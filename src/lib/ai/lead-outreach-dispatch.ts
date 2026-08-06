@@ -27,14 +27,18 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { AiConfig, ChatMessage } from './types'
 import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
+import { latestUserMessage } from './query'
 import { runOutreachTurn } from './outreach-assistant'
 import {
   runQualificationTurn,
   EMPTY_QUALIFICATION_DATA,
   type QualificationData,
 } from './qualification-assistant'
+import { offerSlots, matchOfferedSlot, bookAppointment } from './booking-flow'
+import type { TimeSlot } from '@/lib/google/calendar'
 import { logAiUsage } from './usage'
 import { sendSmsToConversation } from '@/lib/sms/send-message'
 
@@ -43,6 +47,7 @@ interface LeadOutreachStateRow {
   stage: string
   outreach_attempts: number
   qualification_data: QualificationData
+  offered_slots: TimeSlot[]
 }
 
 async function loadState(
@@ -52,7 +57,7 @@ async function loadState(
 ): Promise<LeadOutreachStateRow | null> {
   const { data } = await db
     .from('lead_outreach_state')
-    .select('id, stage, outreach_attempts, qualification_data')
+    .select('id, stage, outreach_attempts, qualification_data, offered_slots')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
     .maybeSingle()
@@ -131,83 +136,138 @@ export async function dispatchInboundToLeadOutreach(
 
     if (state.stage === 'not_started' || state.stage === 'outreach_sent' || state.stage === 'awaiting_reply') {
       // First reply after outreach — move straight to qualification.
-      await db
-        .from('lead_outreach_state')
-        .update({ stage: 'qualifying' })
-        .eq('id', state.id)
+      await db.from('lead_outreach_state').update({ stage: 'qualifying' }).eq('id', state.id)
       await db.from('contacts').update({ lead_status: 'interested' }).eq('id', contactId)
-
-      const { text, data, ready, usage } = await runQualificationTurn({
-        config,
-        companyName,
-        knownData: state.qualification_data ?? EMPTY_QUALIFICATION_DATA,
-        messages,
-      })
-      await persistQualificationTurn(db, accountId, contactId, state.id, data, ready)
-      await logAiUsage(db, {
-        accountId,
-        conversationId,
-        mode: 'lead_qualification',
-        provider: config.provider,
-        model: config.model,
-        usage,
-      })
-      if (text) {
-        await sendSmsToConversation(db, accountId, { conversationId, body: text, isAutomated: true })
-      }
+      await runQualificationStep(db, accountId, contactId, conversationId, config, companyName, state, messages)
       return
     }
 
     if (state.stage === 'qualifying') {
-      const { text, data, ready, usage } = await runQualificationTurn({
-        config,
-        companyName,
-        knownData: state.qualification_data ?? EMPTY_QUALIFICATION_DATA,
-        messages,
-      })
-      await persistQualificationTurn(db, accountId, contactId, state.id, data, ready)
-      await logAiUsage(db, {
-        accountId,
-        conversationId,
-        mode: 'lead_qualification',
-        provider: config.provider,
-        model: config.model,
-        usage,
-      })
-      if (text) {
-        await sendSmsToConversation(db, accountId, { conversationId, body: text, isAutomated: true })
-      }
+      await runQualificationStep(db, accountId, contactId, conversationId, config, companyName, state, messages)
       return
     }
 
-    // stage is 'slot_offered', 'booked', or 'handed_off' — Phase 4b
-    // (Calendar) and Phase 4c (confirmations) own those transitions;
-    // this dispatcher doesn't send anything further on its own for
-    // those stages. A human agent can always reply manually via the
-    // inbox regardless of stage (that path doesn't go through here).
+    if (state.stage === 'slot_offered') {
+      const picked = matchOfferedSlot(latestUserMessage(messages), state.offered_slots ?? [])
+      if (!picked) {
+        await sendSmsToConversation(db, accountId, {
+          conversationId,
+          body: 'Sorry, I didn\'t catch that — please reply with the number (1, 2, or 3) next to the time that works for you.',
+          isAutomated: true,
+        })
+        return
+      }
+
+      const booked = await bookAppointment(db, accountId, {
+        contactId,
+        conversationId,
+        slot: picked,
+        data: state.qualification_data ?? EMPTY_QUALIFICATION_DATA,
+      })
+
+      if (!booked) {
+        // Lost the double-booking race, or Calendar call failed — offer
+        // a fresh set of slots rather than leaving the lead stuck.
+        const offer = await offerSlots(db, accountId)
+        if (offer && offer.slots.length > 0) {
+          await db
+            .from('lead_outreach_state')
+            .update({ offered_slots: offer.slots })
+            .eq('id', state.id)
+          await sendSmsToConversation(db, accountId, {
+            conversationId,
+            body: `That time just got taken — here are some other options:\n${offer.message}`,
+            isAutomated: true,
+          })
+        } else {
+          await sendSmsToConversation(db, accountId, {
+            conversationId,
+            body: 'That time just got taken, and I\'m having trouble finding another — someone from our team will reach out shortly to find a time.',
+            isAutomated: true,
+          })
+          await db.from('lead_outreach_state').update({ stage: 'handed_off' }).eq('id', state.id)
+        }
+        return
+      }
+
+      await db
+        .from('lead_outreach_state')
+        .update({ stage: 'booked', offered_slots: [] })
+        .eq('id', state.id)
+      await db.from('contacts').update({ lead_status: 'appointment_booked' }).eq('id', contactId)
+      // Confirmation SMS content is Phase 4c's job (date/time/location/
+      // reschedule instructions); this dispatcher's responsibility ends
+      // at "the appointment exists," which the cron in Phase 4c reads.
+      return
+    }
+
+    // stage is 'booked' or 'handed_off' — nothing further to
+    // automate; a human agent can always reply manually via the inbox
+    // regardless of stage (that path doesn't go through here).
   } catch (err) {
     console.error('[lead-outreach-dispatch] inbound dispatch failed:', err)
   }
 }
 
-async function persistQualificationTurn(
+async function runQualificationStep(
   db: SupabaseClient,
   accountId: string,
   contactId: string,
-  stateId: string,
-  data: QualificationData,
-  ready: boolean,
+  conversationId: string,
+  config: AiConfig,
+  companyName: string,
+  state: LeadOutreachStateRow,
+  messages: ChatMessage[],
 ): Promise<void> {
-  await db
-    .from('lead_outreach_state')
-    .update({
-      qualification_data: data,
-      stage: ready ? 'slot_offered' : 'qualifying',
-    })
-    .eq('id', stateId)
+  const { text, data, ready, usage } = await runQualificationTurn({
+    config,
+    companyName,
+    knownData: state.qualification_data ?? EMPTY_QUALIFICATION_DATA,
+    messages,
+  })
+  await logAiUsage(db, {
+    accountId,
+    conversationId,
+    mode: 'lead_qualification',
+    provider: config.provider,
+    model: config.model,
+    usage,
+  })
 
-  if (ready) {
-    await db.from('contacts').update({ lead_status: 'appointment_requested' }).eq('id', contactId)
+  if (!ready) {
+    await db
+      .from('lead_outreach_state')
+      .update({ qualification_data: data, stage: 'qualifying' })
+      .eq('id', state.id)
+    if (text) {
+      await sendSmsToConversation(db, accountId, { conversationId, body: text, isAutomated: true })
+    }
+    return
+  }
+
+  await db.from('contacts').update({ lead_status: 'appointment_requested' }).eq('id', contactId)
+
+  const offer = await offerSlots(db, accountId)
+  if (offer && offer.slots.length > 0) {
+    await db
+      .from('lead_outreach_state')
+      .update({ qualification_data: data, stage: 'slot_offered', offered_slots: offer.slots })
+      .eq('id', state.id)
+    const combined = text ? `${text}\n\n${offer.message}` : offer.message
+    await sendSmsToConversation(db, accountId, { conversationId, body: combined, isAutomated: true })
+  } else {
+    // No Google connection, or no open slots — hand off to a human
+    // rather than leaving the lead in limbo.
+    await db
+      .from('lead_outreach_state')
+      .update({ qualification_data: data, stage: 'handed_off' })
+      .eq('id', state.id)
+    const fallback = "Thanks! Someone from our team will reach out shortly to find a time that works."
+    await sendSmsToConversation(db, accountId, {
+      conversationId,
+      body: text ? `${text}\n\n${fallback}` : fallback,
+      isAutomated: true,
+    })
   }
 }
 
