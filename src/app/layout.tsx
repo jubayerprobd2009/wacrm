@@ -14,6 +14,7 @@ import {
   STORAGE_KEY,
   THEME_IDS,
 } from "@/lib/themes";
+import { APP_DESCRIPTION, APP_NAME } from "@/lib/branding";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -22,10 +23,10 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "wacrm",
-    template: "%s — wacrm",
+    default: APP_NAME,
+    template: `%s — ${APP_NAME}`,
   },
-  description: "Self-hostable CRM template for WhatsApp.",
+  description: APP_DESCRIPTION,
   robots: {
     index: false,
     follow: false,
