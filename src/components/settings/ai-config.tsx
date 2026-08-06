@@ -69,6 +69,8 @@ export function AiConfig() {
   const [embeddingsKeyEdited, setEmbeddingsKeyEdited] = useState(false);
   const [hasStoredEmbeddingsKey, setHasStoredEmbeddingsKey] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [outreachSystemPrompt, setOutreachSystemPrompt] = useState('');
+  const [qualificationSystemPrompt, setQualificationSystemPrompt] = useState('');
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [maxPerConversation, setMaxPerConversation] = useState(3);
@@ -96,6 +98,8 @@ export function AiConfig() {
         setProvider(data.provider);
         setModel(data.model);
         setSystemPrompt(data.system_prompt ?? '');
+        setOutreachSystemPrompt(data.outreach_system_prompt ?? '');
+        setQualificationSystemPrompt(data.qualification_system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
@@ -147,6 +151,8 @@ export function AiConfig() {
     api_key: keyPayload(),
     embeddings_api_key: embeddingsKeyPayload(),
     system_prompt: systemPrompt.trim() || null,
+    outreach_system_prompt: outreachSystemPrompt.trim() || null,
+    qualification_system_prompt: qualificationSystemPrompt.trim() || null,
     is_active: isActive,
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
@@ -218,6 +224,8 @@ export function AiConfig() {
         setIsActive(false);
         setAutoReplyEnabled(false);
         setSystemPrompt('');
+        setOutreachSystemPrompt('');
+        setQualificationSystemPrompt('');
         setHandoffAgentId('');
       } else {
         const data = await res.json();
@@ -397,6 +405,38 @@ export function AiConfig() {
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 placeholder={t('promptPlaceholder')}
                 rows={5}
+                disabled={disabled}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-outreach-prompt">Insurance lead outreach prompt</Label>
+              <p className="text-xs text-muted-foreground">
+                Extra instructions for the first-contact SMS assistant (introduces the
+                company, gauges interest). Leave blank to use the default behavior.
+              </p>
+              <Textarea
+                id="ai-outreach-prompt"
+                value={outreachSystemPrompt}
+                onChange={(e) => setOutreachSystemPrompt(e.target.value)}
+                placeholder="e.g. We specialize in auto and home insurance for the Dallas area..."
+                rows={4}
+                disabled={disabled}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-qualification-prompt">Appointment qualification prompt</Label>
+              <p className="text-xs text-muted-foreground">
+                Extra instructions for the assistant that collects booking details once a
+                lead is interested. Leave blank to use the default behavior.
+              </p>
+              <Textarea
+                id="ai-qualification-prompt"
+                value={qualificationSystemPrompt}
+                onChange={(e) => setQualificationSystemPrompt(e.target.value)}
+                placeholder="e.g. Our office is open Mon-Fri 9am-5pm; appointments are 30 minutes..."
+                rows={4}
                 disabled={disabled}
               />
             </div>
