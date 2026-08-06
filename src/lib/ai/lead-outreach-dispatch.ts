@@ -38,6 +38,7 @@ import {
   type QualificationData,
 } from './qualification-assistant'
 import { offerSlots, matchOfferedSlot, bookAppointment } from './booking-flow'
+import { sendConfirmation, detectBookedReplyIntent, cancelAppointment } from './confirmation'
 import type { TimeSlot } from '@/lib/google/calendar'
 import { logAiUsage } from './usage'
 import { sendSmsToConversation } from '@/lib/sms/send-message'
@@ -195,15 +196,65 @@ export async function dispatchInboundToLeadOutreach(
         .update({ stage: 'booked', offered_slots: [] })
         .eq('id', state.id)
       await db.from('contacts').update({ lead_status: 'appointment_booked' }).eq('id', contactId)
-      // Confirmation SMS content is Phase 4c's job (date/time/location/
-      // reschedule instructions); this dispatcher's responsibility ends
-      // at "the appointment exists," which the cron in Phase 4c reads.
+
+      const { data: apptRow } = await db
+        .from('appointments')
+        .select('id, scheduled_start, scheduled_end, location_or_link, google_calendar_event_id, google_calendar_id')
+        .eq('id', booked.appointmentId)
+        .single()
+      if (apptRow) {
+        await sendConfirmation(db, accountId, conversationId, apptRow, companyName)
+      }
       return
     }
 
-    // stage is 'booked' or 'handed_off' — nothing further to
-    // automate; a human agent can always reply manually via the inbox
-    // regardless of stage (that path doesn't go through here).
+    if (state.stage === 'booked') {
+      const intent = detectBookedReplyIntent(latestUserMessage(messages))
+      if (intent === 'other') return // no automated action; human can reply from the inbox
+
+      const { data: appt } = await db
+        .from('appointments')
+        .select('id, scheduled_start, scheduled_end, location_or_link, google_calendar_event_id, google_calendar_id')
+        .eq('account_id', accountId)
+        .eq('contact_id', contactId)
+        .eq('status', 'confirmed')
+        .order('scheduled_start', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+      if (!appt) return
+
+      if (intent === 'cancel') {
+        await cancelAppointment(db, accountId, conversationId, appt)
+        await db.from('contacts').update({ lead_status: 'not_interested' }).eq('id', contactId)
+        await db.from('lead_outreach_state').update({ stage: 'handed_off' }).eq('id', state.id)
+        return
+      }
+
+      // reschedule: cancel the existing booking, then re-offer slots
+      // exactly like the initial qualifying→slot_offered transition.
+      await cancelAppointment(db, accountId, conversationId, appt)
+      const offer = await offerSlots(db, accountId)
+      if (offer && offer.slots.length > 0) {
+        await db
+          .from('lead_outreach_state')
+          .update({ stage: 'slot_offered', offered_slots: offer.slots })
+          .eq('id', state.id)
+        await db.from('contacts').update({ lead_status: 'appointment_requested' }).eq('id', contactId)
+        await sendSmsToConversation(db, accountId, { conversationId, body: offer.message, isAutomated: true })
+      } else {
+        await db.from('lead_outreach_state').update({ stage: 'handed_off' }).eq('id', state.id)
+        await sendSmsToConversation(db, accountId, {
+          conversationId,
+          body: "Someone from our team will reach out shortly to find a new time.",
+          isAutomated: true,
+        })
+      }
+      return
+    }
+
+    // stage is 'handed_off' — nothing further to automate; a human
+    // agent can always reply manually via the inbox regardless of
+    // stage (that path doesn't go through here).
   } catch (err) {
     console.error('[lead-outreach-dispatch] inbound dispatch failed:', err)
   }
