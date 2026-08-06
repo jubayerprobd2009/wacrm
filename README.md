@@ -1,8 +1,7 @@
-# wacrm — CRM Template for WhatsApp
+# Nate Ceant CRM
 
-> Self-hostable CRM template for WhatsApp® — shared inbox, contacts,
-> sales pipelines, broadcasts, and no-code automations. Fork it, brand
-> it, host it.
+> Insurance lead CRM and SMS automation — shared inbox, contacts,
+> sales pipelines, appointment booking, and AI-driven outreach.
 
 <p align="center">
   <a href="https://www.hostinger.com/web-apps-hosting?REFERRALCODE=WACRMHOST">

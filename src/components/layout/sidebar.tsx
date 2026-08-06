@@ -200,7 +200,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               className="h-8 w-8 shrink-0 rounded-lg object-cover"
             />
             <span className="text-sm font-semibold text-foreground">
-              {t("title")}
+              {APP_NAME}
             </span>
           </Link>
           <button
