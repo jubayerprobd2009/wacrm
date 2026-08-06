@@ -5,6 +5,7 @@ import { normalizePhone, sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 import { reopenClosedConversation } from '@/lib/conversations/reopen';
 import { verifyTwilioWebhookSignature } from '@/lib/sms/webhook-signature';
+import { updateLeadStatus } from '@/lib/contacts/lead-status';
 
 // ============================================================
 // POST /api/sms/webhook — inbound Twilio SMS delivery.
@@ -138,12 +139,12 @@ export async function POST(request: Request) {
       .update({
         do_not_contact: true,
         do_not_contact_at: new Date().toISOString(),
-        lead_status: 'do_not_contact',
       })
       .eq('id', contact.id);
     if (optOutErr) {
       console.error('[sms webhook] failed to record opt-out:', optOutErr);
     }
+    await updateLeadStatus(admin, accountId, contact.id, 'do_not_contact');
 
     await admin
       .from('lead_outreach_state')

@@ -42,6 +42,7 @@ import { sendConfirmation, detectBookedReplyIntent, cancelAppointment } from './
 import type { TimeSlot } from '@/lib/google/calendar'
 import { logAiUsage } from './usage'
 import { sendSmsToConversation } from '@/lib/sms/send-message'
+import { updateLeadStatus } from '@/lib/contacts/lead-status'
 
 interface LeadOutreachStateRow {
   id: string
@@ -109,7 +110,7 @@ export async function dispatchInboundToLeadOutreach(
     // even an opted-out contact replying is "customer_responded" from
     // a CRM-status point of view (it just won't progress toward booking).
     if (contact.lead_status === 'new_lead' || contact.lead_status === 'message_sent') {
-      await db.from('contacts').update({ lead_status: 'customer_responded' }).eq('id', contactId)
+      await updateLeadStatus(db, accountId, contactId, 'customer_responded')
     }
 
     if (contact.do_not_contact || state.stage === 'opted_out') {
@@ -138,7 +139,7 @@ export async function dispatchInboundToLeadOutreach(
     if (state.stage === 'not_started' || state.stage === 'outreach_sent' || state.stage === 'awaiting_reply') {
       // First reply after outreach — move straight to qualification.
       await db.from('lead_outreach_state').update({ stage: 'qualifying' }).eq('id', state.id)
-      await db.from('contacts').update({ lead_status: 'interested' }).eq('id', contactId)
+      await updateLeadStatus(db, accountId, contactId, 'interested')
       await runQualificationStep(db, accountId, contactId, conversationId, config, companyName, state, messages)
       return
     }
@@ -195,7 +196,7 @@ export async function dispatchInboundToLeadOutreach(
         .from('lead_outreach_state')
         .update({ stage: 'booked', offered_slots: [] })
         .eq('id', state.id)
-      await db.from('contacts').update({ lead_status: 'appointment_booked' }).eq('id', contactId)
+      await updateLeadStatus(db, accountId, contactId, 'appointment_booked')
 
       const { data: apptRow } = await db
         .from('appointments')
@@ -225,7 +226,7 @@ export async function dispatchInboundToLeadOutreach(
 
       if (intent === 'cancel') {
         await cancelAppointment(db, accountId, conversationId, appt)
-        await db.from('contacts').update({ lead_status: 'not_interested' }).eq('id', contactId)
+        await updateLeadStatus(db, accountId, contactId, 'not_interested')
         await db.from('lead_outreach_state').update({ stage: 'handed_off' }).eq('id', state.id)
         return
       }
@@ -239,7 +240,7 @@ export async function dispatchInboundToLeadOutreach(
           .from('lead_outreach_state')
           .update({ stage: 'slot_offered', offered_slots: offer.slots })
           .eq('id', state.id)
-        await db.from('contacts').update({ lead_status: 'appointment_requested' }).eq('id', contactId)
+        await updateLeadStatus(db, accountId, contactId, 'appointment_requested')
         await sendSmsToConversation(db, accountId, { conversationId, body: offer.message, isAutomated: true })
       } else {
         await db.from('lead_outreach_state').update({ stage: 'handed_off' }).eq('id', state.id)
@@ -296,7 +297,7 @@ async function runQualificationStep(
     return
   }
 
-  await db.from('contacts').update({ lead_status: 'appointment_requested' }).eq('id', contactId)
+  await updateLeadStatus(db, accountId, contactId, 'appointment_requested')
 
   const offer = await offerSlots(db, accountId)
   if (offer && offer.slots.length > 0) {
@@ -375,7 +376,7 @@ export async function sendInitialOutreach(
         { onConflict: 'account_id,contact_id' },
       )
 
-    await db.from('contacts').update({ lead_status: 'message_sent' }).eq('id', contactId)
+    await updateLeadStatus(db, accountId, contactId, 'message_sent')
   } catch (err) {
     console.error('[lead-outreach-dispatch] initial outreach failed:', err)
   }
