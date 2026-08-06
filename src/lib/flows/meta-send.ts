@@ -8,7 +8,7 @@ import {
   type MediaKind,
 } from '@/lib/whatsapp/meta-api'
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
-import { decrypt } from '@/lib/whatsapp/encryption'
+import { decrypt } from '@/lib/crypto/encryption'
 import {
   sanitizePhoneForMeta,
   isValidE164,

@@ -19,7 +19,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
-import { decrypt } from '@/lib/whatsapp/encryption';
+import { decrypt } from '@/lib/crypto/encryption';
 import {
   sanitizePhoneForMeta,
   isValidE164,

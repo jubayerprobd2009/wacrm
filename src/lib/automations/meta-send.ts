@@ -4,7 +4,7 @@ import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
 } from '@/lib/flows/meta-send'
-import { decrypt } from '@/lib/whatsapp/encryption'
+import { decrypt } from '@/lib/crypto/encryption'
 import {
   sanitizePhoneForMeta,
   isValidE164,

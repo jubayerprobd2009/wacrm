@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-vi.mock('@/lib/whatsapp/encryption', () => ({
+vi.mock('@/lib/crypto/encryption', () => ({
   decrypt: (s: string) => s,
   encrypt: (s: string) => s,
 }));
