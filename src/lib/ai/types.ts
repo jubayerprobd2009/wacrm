@@ -18,6 +18,13 @@ export interface AiConfig {
   model: string
   apiKey: string
   systemPrompt: string | null
+  /** Stage-1 (cold outreach) and stage-2 (booking qualification)
+   *  prompts for the insurance lead flow — see
+   *  src/lib/ai/outreach-assistant.ts / qualification-assistant.ts.
+   *  Independent of `systemPrompt`, which drives WhatsApp draft/
+   *  auto-reply. */
+  outreachSystemPrompt: string | null
+  qualificationSystemPrompt: string | null
   isActive: boolean
   autoReplyEnabled: boolean
   autoReplyMaxPerConversation: number

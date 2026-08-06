@@ -219,7 +219,7 @@ export async function POST(request: Request) {
   after(async () => {
     try {
       const { dispatchInboundToLeadOutreach } = await import('@/lib/ai/lead-outreach-dispatch');
-      await dispatchInboundToLeadOutreach(admin, accountId, contact.id, conversationId, body);
+      await dispatchInboundToLeadOutreach(admin, accountId, contact.id, conversationId);
     } catch (err) {
       console.error('[sms webhook] outreach dispatch failed:', err instanceof Error ? err.message : err);
     }
