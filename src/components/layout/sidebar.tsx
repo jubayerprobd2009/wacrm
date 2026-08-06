@@ -33,7 +33,7 @@ import type { AccountRole } from "@/lib/auth/roles";
 // Per-role chip metadata used in the sidebar's account strip + the
 // Members tab roster. Keeping this near both consumers in a single
 // place avoids drift between the two surfaces — when a designer
-// wants to recolour "agent" rows, this is the one diff.
+// wants to recolour "manager" rows, this is the one diff.
 const ROLE_CHIP: Record<
   AccountRole,
   { icon: typeof Crown; labelKey: string; className: string }
@@ -52,9 +52,9 @@ const ROLE_CHIP: Record<
     className:
       "border-primary/40 bg-primary/10 text-primary",
   },
-  agent: {
+  manager: {
     icon: UserCog,
-    labelKey: "roleAgent",
+    labelKey: "roleManager",
     // Neutral slate: the operational default.
     className:
       "border-border bg-muted text-foreground",
@@ -62,7 +62,7 @@ const ROLE_CHIP: Record<
   viewer: {
     icon: User,
     labelKey: "roleViewer",
-    // Muted slate: read-only role; visually quieter than agent.
+    // Muted slate: read-only role; visually quieter than manager.
     className:
       "border-border bg-card text-muted-foreground",
   },

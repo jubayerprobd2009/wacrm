@@ -60,7 +60,7 @@ interface NewRecipient {
 
 export async function POST(request: Request) {
   try {
-    // Requires the 'agent' role — `canSendMessages` in lib/auth/roles is
+    // Requires the 'manager' role — `canSendMessages` in lib/auth/roles is
     // explicit that running broadcasts is a write operation and that
     // viewers are read-only.
     //
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     // to arbitrary phone numbers from the account's WhatsApp number.
     // Nothing about that is recoverable after the fact, so the check has
     // to happen here.
-    const { supabase, accountId, userId } = await requireRole('agent')
+    const { supabase, accountId, userId } = await requireRole('manager')
 
     // Per-user broadcast budget. Note: this limits how often a user
     // can *start* a campaign, not how many messages go out inside

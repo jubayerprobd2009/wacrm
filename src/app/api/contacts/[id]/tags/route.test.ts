@@ -34,7 +34,7 @@ const context = {
   supabase: { name: 'scoped-client' },
   accountId: 'account-1',
   userId: 'user-1',
-  role: 'agent',
+  role: 'manager',
   account: { id: 'account-1', name: 'Acme' },
 };
 
@@ -56,13 +56,13 @@ beforeEach(() => {
 });
 
 describe('/api/contacts/[id]/tags', () => {
-  it('requires an agent and dispatches a newly-added tag', async () => {
+  it('requires a manager and dispatches a newly-added tag', async () => {
     mocks.add.mockResolvedValue({ added: true, dispatched: true });
 
     const response = await POST(request('POST', { tag_id: 'tag-1' }), params);
 
     expect(response.status).toBe(200);
-    expect(mocks.requireRole).toHaveBeenCalledWith('agent');
+    expect(mocks.requireRole).toHaveBeenCalledWith('manager');
     expect(mocks.add).toHaveBeenCalledWith({
       db: context.supabase,
       accountId: 'account-1',

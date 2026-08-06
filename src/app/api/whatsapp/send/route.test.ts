@@ -15,7 +15,7 @@ const messageInserts: Array<Record<string, unknown>> = []
 let existingConversation: Record<string, unknown> | null = null
 let contactRow: Record<string, unknown> | null = null
 // The caller's role, as `requireRole` reads it off the profile. Sending
-// requires 'agent'; 'viewer' must be refused before anything reaches Meta.
+// requires 'manager'; 'viewer' must be refused before anything reaches Meta.
 let callerRole: string = 'admin'
 // A conversation created during the request becomes retrievable by id —
 // the shared send core re-loads the conversation (with its contact) from
@@ -305,8 +305,8 @@ describe('POST /api/whatsapp/send — role enforcement', () => {
     expect(messageInserts).toHaveLength(0)
   })
 
-  it('allows an agent through', async () => {
-    callerRole = 'agent'
+  it('allows a manager through', async () => {
+    callerRole = 'manager'
 
     const res = await postContactTemplate()
 

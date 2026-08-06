@@ -39,7 +39,11 @@ import {
 import { useTranslations } from 'next-intl';
 import { useAuth } from '@/hooks/use-auth';
 
-type InviteRole = 'admin' | 'agent' | 'viewer';
+// `viewer` is intentionally excluded — the client's three named roles
+// are Owner/Admin/Manager. The role stays valid at the DB/type level
+// (AccountRole) for backward compatibility; it's just not offered
+// when inviting a new teammate.
+type InviteRole = 'admin' | 'manager';
 
 interface InviteMemberDialogProps {
   open: boolean;
@@ -77,14 +81,14 @@ export function InviteMemberDialog({
   const t = useTranslations('Settings.invite');
   const tRoles = useTranslations('Settings.roles');
   const { account } = useAuth();
-  const [role, setRole] = useState<InviteRole>('agent');
+  const [role, setRole] = useState<InviteRole>('manager');
   const [expiry, setExpiry] = useState<string>('7');
   const [label, setLabel] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreatedInvite | null>(null);
 
   function reset() {
-    setRole('agent');
+    setRole('manager');
     setExpiry('7');
     setLabel('');
     setResult(null);
@@ -278,12 +282,11 @@ export function InviteMemberDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">{tRoles('admin')}</SelectItem>
-                    <SelectItem value="agent">{tRoles('agent')}</SelectItem>
-                    <SelectItem value="viewer">{tRoles('viewer')}</SelectItem>
+                    <SelectItem value="manager">{tRoles('manager')}</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {tRoles(`${role}Hint` as 'adminHint' | 'agentHint' | 'viewerHint')}
+                  {tRoles(`${role}Hint` as 'adminHint' | 'managerHint')}
                 </p>
               </div>
 

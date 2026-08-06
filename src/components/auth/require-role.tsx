@@ -7,7 +7,7 @@ import { hasMinRole, type AccountRole } from "@/lib/auth/roles";
 
 interface RequireRoleProps {
   /** Minimum role to render `children`. Uses the standard hierarchy
-   *  owner > admin > agent > viewer. */
+   *  owner > admin > manager > viewer. */
   min: AccountRole;
   /** What to render while the role is below `min` OR while we don't
    *  yet know the role (`profileLoading` is true). Defaults to

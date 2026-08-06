@@ -26,7 +26,7 @@ export async function GET() {
 export async function POST(request: Request) {
   let ctx
   try {
-    ctx = await requireRole('agent')
+    ctx = await requireRole('manager')
   } catch (err) {
     return toErrorResponse(err)
   }

@@ -2,14 +2,14 @@
 // GET /api/account/members
 //
 // Lists every member of the caller's account. Any member can call
-// it (the Members tab is shown to admins+, but agents/viewers see
+// it (the Members tab is shown to admins+, but managers/viewers see
 // a read-only roster too).
 //
 // Field visibility
 //   Sensitive fields (email) are returned only when the caller is
-//   admin+. Agents and viewers see name + avatar + role + joined
+//   admin+. Managers and viewers see name + avatar + role + joined
 //   date only. This mirrors the design decision from the planning
-//   phase: "agent/viewer sees names only".
+//   phase: "manager/viewer sees names only".
 // ============================================================
 
 import { NextResponse } from "next/server";

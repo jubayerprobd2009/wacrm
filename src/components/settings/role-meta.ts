@@ -34,9 +34,9 @@ export const ROLE_META: Record<
     variant: 'admin',
     className: 'border-primary/40 bg-primary/10 text-primary',
   },
-  agent: {
+  manager: {
     icon: UserCog,
-    label: 'agent',
+    label: 'manager',
     variant: 'muted',
     className: 'border-border bg-muted text-muted-foreground',
   },
@@ -44,7 +44,7 @@ export const ROLE_META: Record<
     icon: UserIcon,
     label: 'viewer',
     variant: 'muted',
-    // Outline-only so it stays quieter than the filled Agent chip in
+    // Outline-only so it stays quieter than the filled Manager chip in
     // both modes — bg-card would blend into a card surface in light mode.
     className: 'border-border bg-transparent text-muted-foreground',
   },

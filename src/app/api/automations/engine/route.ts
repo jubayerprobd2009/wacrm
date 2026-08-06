@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   // at least `agent`; a viewer must not be able to trigger sends.
   let accountId: string
   try {
-    const ctx = await requireRole('agent')
+    const ctx = await requireRole('manager')
     accountId = ctx.accountId
   } catch (err) {
     return toErrorResponse(err)

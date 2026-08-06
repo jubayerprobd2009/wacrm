@@ -25,7 +25,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireRole('agent');
+    const ctx = await requireRole('manager');
     const { id: contactId } = await params;
     const tagId = await readTagId(request);
     if (!tagId) {
@@ -53,7 +53,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireRole('agent');
+    const ctx = await requireRole('manager');
     const { id: contactId } = await params;
     const tagId = await readTagId(request);
     if (!tagId) {

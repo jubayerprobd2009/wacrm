@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     // reaction to Meta before mirroring it locally — so, as on /send, a
     // missing role check let a read-only viewer put a visible reaction on
     // the customer's message even though RLS blocked the local mirror.
-    const { supabase, accountId, userId } = await requireRole('agent');
+    const { supabase, accountId, userId } = await requireRole('manager');
 
     const limit = checkRateLimit(`react:${userId}`, RATE_LIMITS.react);
     if (!limit.success) {
