@@ -24,6 +24,7 @@ interface SmsConfigResponse {
   twilio_account_sid?: string;
   twilio_phone_number?: string;
   messaging_service_sid?: string | null;
+  support_contact?: string | null;
   is_active?: boolean;
   has_token?: boolean;
 }
@@ -42,6 +43,7 @@ export function SmsConfig() {
   const [tokenEdited, setTokenEdited] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [messagingServiceSid, setMessagingServiceSid] = useState('');
+  const [supportContact, setSupportContact] = useState('');
 
   const loadedAccountIdRef = useRef<string | null>(null);
 
@@ -59,6 +61,7 @@ export function SmsConfig() {
         setAccountSid(data.twilio_account_sid ?? '');
         setPhoneNumber(data.twilio_phone_number ?? '');
         setMessagingServiceSid(data.messaging_service_sid ?? '');
+        setSupportContact(data.support_contact ?? '');
         setAuthToken(data.has_token ? MASKED_TOKEN : '');
         setTokenEdited(false);
       }
@@ -94,6 +97,7 @@ export function SmsConfig() {
           twilio_auth_token: tokenEdited ? authToken.trim() : undefined,
           twilio_phone_number: phoneNumber.trim(),
           messaging_service_sid: messagingServiceSid.trim() || null,
+          support_contact: supportContact.trim() || null,
         }),
       });
       const data = await res.json();
@@ -122,6 +126,7 @@ export function SmsConfig() {
         setTokenEdited(false);
         setPhoneNumber('');
         setMessagingServiceSid('');
+        setSupportContact('');
       } else {
         const data = await res.json();
         toast.error(data.error ?? 'Failed to disconnect SMS.');
@@ -220,6 +225,22 @@ export function SmsConfig() {
             <p className="text-xs text-muted-foreground">
               Recommended: enables Twilio&apos;s built-in Advanced Opt-Out (STOP/START/HELP)
               at the platform level, on top of the app&apos;s own opt-out handling.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sms-support-contact">
+              Support contact <span className="text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="sms-support-contact"
+              value={supportContact}
+              onChange={(e) => setSupportContact(e.target.value)}
+              placeholder="(555) 123-4567 or support@company.com"
+              disabled={disabled}
+            />
+            <p className="text-xs text-muted-foreground">
+              Shown as a &quot;Questions? Contact us: …&quot; line in appointment confirmation
+              and reminder texts.
             </p>
           </div>
 

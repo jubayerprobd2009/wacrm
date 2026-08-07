@@ -17,7 +17,7 @@ export async function GET() {
 
     const { data, error } = await supabase
       .from('sms_config')
-      .select('twilio_account_sid, twilio_phone_number, messaging_service_sid, is_active, twilio_auth_token')
+      .select('twilio_account_sid, twilio_phone_number, messaging_service_sid, support_contact, is_active, twilio_auth_token')
       .eq('account_id', accountId)
       .maybeSingle();
 
@@ -65,6 +65,7 @@ export async function POST(request: Request) {
       twilio_auth_token,
       twilio_phone_number,
       messaging_service_sid,
+      support_contact,
     } = body as Record<string, unknown>;
 
     if (typeof twilio_account_sid !== 'string' || !twilio_account_sid.trim()) {
@@ -108,11 +109,13 @@ export async function POST(request: Request) {
             typeof messaging_service_sid === 'string' && messaging_service_sid.trim()
               ? messaging_service_sid.trim()
               : null,
+          support_contact:
+            typeof support_contact === 'string' && support_contact.trim() ? support_contact.trim() : null,
           is_active: true,
         },
         { onConflict: 'account_id' },
       )
-      .select('twilio_account_sid, twilio_phone_number, messaging_service_sid, is_active')
+      .select('twilio_account_sid, twilio_phone_number, messaging_service_sid, support_contact, is_active')
       .single();
 
     if (error) {

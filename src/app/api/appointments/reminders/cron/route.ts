@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
-import { buildReminderMessage } from '@/lib/ai/confirmation'
+import { buildReminderMessage, loadSupportContact } from '@/lib/ai/confirmation'
 import { sendSmsToConversation } from '@/lib/sms/send-message'
 
 /**
@@ -49,10 +49,11 @@ export async function GET(request: Request) {
     try {
       const { data: account } = await admin.from('accounts').select('name').eq('id', appt.account_id).maybeSingle()
       const companyName = account?.name || 'our team'
+      const supportContact = await loadSupportContact(admin, appt.account_id)
 
       await sendSmsToConversation(admin, appt.account_id, {
         conversationId: appt.conversation_id,
-        body: buildReminderMessage(appt, companyName),
+        body: buildReminderMessage(appt, companyName, supportContact),
         isAutomated: true,
       })
       await admin.from('appointments').update({ reminder_sent_at: new Date().toISOString() }).eq('id', appt.id)

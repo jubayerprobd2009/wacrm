@@ -23,6 +23,16 @@ describe('buildConfirmationMessage', () => {
     const msg = buildConfirmationMessage({ ...APPT, location_or_link: null }, 'Acme Insurance')
     expect(msg).not.toContain('Where:')
   })
+
+  it('includes the support contact line when configured', () => {
+    const msg = buildConfirmationMessage(APPT, 'Acme Insurance', '(555) 123-4567')
+    expect(msg).toContain('Questions? Contact us: (555) 123-4567')
+  })
+
+  it('omits the contact line when support contact is not configured', () => {
+    const msg = buildConfirmationMessage(APPT, 'Acme Insurance', null)
+    expect(msg).not.toContain('Questions? Contact us')
+  })
 })
 
 describe('buildReminderMessage', () => {

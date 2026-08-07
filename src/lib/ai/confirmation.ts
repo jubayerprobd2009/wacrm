@@ -26,23 +26,44 @@ function formatDateTime(iso: string): { date: string; time: string } {
   }
 }
 
-export function buildConfirmationMessage(appt: AppointmentRow, companyName: string): string {
+export function buildConfirmationMessage(
+  appt: AppointmentRow,
+  companyName: string,
+  supportContact?: string | null,
+): string {
   const { date, time } = formatDateTime(appt.scheduled_start)
   const where = appt.location_or_link ? `\nWhere: ${appt.location_or_link}` : ''
+  const contact = supportContact?.trim() ? `\nQuestions? Contact us: ${supportContact.trim()}` : ''
   return (
     `You're confirmed with ${companyName}!\n` +
-    `${date} at ${time}${where}\n\n` +
+    `${date} at ${time}${where}${contact}\n\n` +
     `Reply RESCHEDULE to pick a different time, or CANCEL to cancel.`
   )
 }
 
-export function buildReminderMessage(appt: AppointmentRow, companyName: string): string {
+export function buildReminderMessage(
+  appt: AppointmentRow,
+  companyName: string,
+  supportContact?: string | null,
+): string {
   const { date, time } = formatDateTime(appt.scheduled_start)
   const where = appt.location_or_link ? `\nWhere: ${appt.location_or_link}` : ''
+  const contact = supportContact?.trim() ? `\nQuestions? Contact us: ${supportContact.trim()}` : ''
   return (
-    `Reminder: your appointment with ${companyName} is ${date} at ${time}.${where}\n\n` +
+    `Reminder: your appointment with ${companyName} is ${date} at ${time}.${where}${contact}\n\n` +
     `Reply RESCHEDULE or CANCEL if you need to make a change.`
   )
+}
+
+/** The operator-configured "contact us" line (Settings -> SMS ->
+ *  Support contact), appended to confirmation/reminder SMS. */
+export async function loadSupportContact(db: SupabaseClient, accountId: string): Promise<string | null> {
+  const { data } = await db
+    .from('sms_config')
+    .select('support_contact')
+    .eq('account_id', accountId)
+    .maybeSingle()
+  return data?.support_contact ?? null
 }
 
 /** Send the confirmation and mark `confirmation_sent_at`. Best-effort
@@ -55,9 +76,10 @@ export async function sendConfirmation(
   companyName: string,
 ): Promise<void> {
   try {
+    const supportContact = await loadSupportContact(db, accountId)
     await sendSmsToConversation(db, accountId, {
       conversationId,
-      body: buildConfirmationMessage(appt, companyName),
+      body: buildConfirmationMessage(appt, companyName, supportContact),
       isAutomated: true,
     })
     await db.from('appointments').update({ confirmation_sent_at: new Date().toISOString() }).eq('id', appt.id)
