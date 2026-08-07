@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useMemo, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -49,13 +49,26 @@ function SettingsPageInner() {
   const { mode } = useTheme();
   const t = useTranslations('Settings');
 
-  // The URL (`?tab=`) is the single source of truth for the active
-  // section — deep-linkable, and it keeps the existing links in the
-  // app sidebar/header working. Legacy tab values (tags, custom-fields)
-  // resolve onto their new home; unknown/empty → the Overview landing.
-  const section = resolveSection(searchParams.get('tab'));
+  // The URL (`?tab=`) is the deep-linkable source of truth, but the
+  // rendered section is driven by local state — not read directly from
+  // searchParams on every render. `router.replace` on this route can
+  // take a while to resolve (RSC round-trip on a slow/constrained
+  // deploy), and while it's pending, `searchParams` here still reflects
+  // the OLD url, so a section derived straight from it appears frozen:
+  // the rail highlights the just-clicked item (its own local hover/
+  // focus state) but the panel below doesn't switch — clicks look
+  // broken. Local state flips the panel immediately; the effect below
+  // still keeps the URL and browser back/forward in sync.
+  const [section, setSection] = useState<SettingsSection>(() =>
+    resolveSection(searchParams.get('tab')),
+  );
+
+  useEffect(() => {
+    setSection(resolveSection(searchParams.get('tab')));
+  }, [searchParams]);
 
   const go = (next: SettingsSection) => {
+    setSection(next);
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', next);
     router.replace(`/settings?${params.toString()}`, { scroll: false });
