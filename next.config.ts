@@ -69,6 +69,16 @@ const nextConfig: NextConfig = {
   // Harmless outside Docker: `next start` keeps working as before.
   output: "standalone",
 
+  // `next build` runs its own full-project TypeScript pass on top of
+  // compiling — on a memory-constrained build host (small VPS) that
+  // second pass is what pushes the Node process to OOM, not the
+  // compile itself. `npx tsc --noEmit` already gates every change in
+  // CI/dev with the exact same compiler settings, so this isn't
+  // skipping type-checking — it's not paying for it twice.
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+
   /**
    * Cross-origin dev access (Next.js 16).
    *
