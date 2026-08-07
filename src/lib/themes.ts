@@ -14,16 +14,16 @@
  */
 
 export const THEME_IDS = [
+  "emerald",
   "cobalt",
   "violet",
-  "emerald",
   "amber",
   "rose",
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
 
-export const DEFAULT_THEME: ThemeId = "cobalt";
+export const DEFAULT_THEME: ThemeId = "emerald";
 
 export const STORAGE_KEY = "wacrm.theme";
 
@@ -68,9 +68,15 @@ export interface ThemeMeta {
 
 export const THEMES: ReadonlyArray<ThemeMeta> = [
   {
+    id: "emerald",
+    name: "Emerald",
+    tagline: "The default.",
+    swatch: "oklch(0.62 0.16 162)",
+  },
+  {
     id: "cobalt",
     name: "Cobalt",
-    tagline: "The default — matches the Nate Ceant navy/gold brand.",
+    tagline: "Matches the Nate Ceant navy/gold brand.",
     swatch: "oklch(0.585 0.2 254)",
   },
   {
@@ -78,12 +84,6 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
     name: "Violet",
     tagline: "Confident, slightly playful.",
     swatch: "oklch(0.526 0.247 293)",
-  },
-  {
-    id: "emerald",
-    name: "Emerald",
-    tagline: "Growth-coded, nods at messaging without copying WhatsApp green.",
-    swatch: "oklch(0.62 0.16 162)",
   },
   {
     id: "amber",
