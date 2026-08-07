@@ -1588,7 +1588,18 @@
       "evolutionScanTitle": "이 QR 코드를 스캔하세요",
       "evolutionScanDesc": "휴대폰에서 WhatsApp을 열고 → 연결된 기기 → 기기 연결을 눌러 스캔하세요.",
       "evolutionScanDescPolling": "스캔을 기다리는 중… 휴대폰에서 WhatsApp을 열고 → 연결된 기기 → 기기 연결을 눌러 스캔하세요.",
-      "evolutionQrAlt": "Evolution API 연결 QR 코드"
+      "evolutionQrAlt": "Evolution API 연결 QR 코드",
+      "evolutionDefaultName": "WhatsApp",
+      "active": "활성화됨",
+      "evolutionModalTitle": "Evolution API 연결",
+      "evolutionModalDesc": "이름을 입력하고 휴대폰으로 QR 코드를 스캔하면 연결을 자동으로 감지합니다.",
+      "evolutionModalStep_name": "이름",
+      "evolutionModalStep_scan": "스캔",
+      "evolutionModalStep_connected": "연결됨",
+      "evolutionDisplayName": "표시 이름",
+      "evolutionDisplayNamePlaceholder": "예: 고객지원 WhatsApp",
+      "evolutionGenerateQr": "QR 생성",
+      "done": "완료"
     },
     "sections": {
       "overview": "개요",

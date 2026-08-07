@@ -1588,7 +1588,18 @@
       "evolutionScanTitle": "Scan this QR code",
       "evolutionScanDesc": "Open WhatsApp on your phone → Linked Devices → Link a Device, then scan.",
       "evolutionScanDescPolling": "Waiting for scan… Open WhatsApp on your phone → Linked Devices → Link a Device, then scan.",
-      "evolutionQrAlt": "Evolution API connection QR code"
+      "evolutionQrAlt": "Evolution API connection QR code",
+      "evolutionDefaultName": "WhatsApp",
+      "active": "Active",
+      "evolutionModalTitle": "Connect Evolution API",
+      "evolutionModalDesc": "Give it a name, scan the QR code from your phone, and we detect the connection automatically.",
+      "evolutionModalStep_name": "Name",
+      "evolutionModalStep_scan": "Scan",
+      "evolutionModalStep_connected": "Connected",
+      "evolutionDisplayName": "Display name",
+      "evolutionDisplayNamePlaceholder": "e.g. Support WhatsApp",
+      "evolutionGenerateQr": "Generate QR",
+      "done": "Done"
     },
     "sections": {
       "overview": "Overview",

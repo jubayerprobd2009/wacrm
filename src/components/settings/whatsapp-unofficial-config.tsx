@@ -23,9 +23,9 @@ import {
   Loader2,
   AlertTriangle,
   QrCode,
-  RefreshCw,
   Unplug,
   ShieldAlert,
+  MessageCircle,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useAuth } from '@/hooks/use-auth';
@@ -51,6 +51,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 
 type UnofficialProvider = 'wasender' | 'evolution';
@@ -73,6 +80,7 @@ interface UnofficialConfigResponse {
   has_instance_token?: boolean;
   base_url?: string | null;
   instance_name?: string | null;
+  display_name?: string | null;
 }
 
 const ACK_STORAGE_PREFIX = 'wacrm.unofficial-ban-ack.';
@@ -582,8 +590,13 @@ function WaSenderPanel({
 }
 
 // ------------------------------------------------------------
-// Evolution API panel — in-app QR, polled connect flow.
+// Evolution API panel — no server URL / admin key fields in the UI
+// (those come entirely from EVOLUTION_API_URL / EVOLUTION_API_KEY on
+// the server). Just a name → QR → connected modal, then a status card
+// with Reconnect once a connection exists.
 // ------------------------------------------------------------
+
+type EvolutionModalStep = 'name' | 'scan' | 'connected';
 
 function EvolutionPanel({
   t,
@@ -598,29 +611,25 @@ function EvolutionPanel({
   acknowledged: boolean;
   onSaved: () => Promise<void> | void;
 }) {
-  const [baseUrl, setBaseUrl] = useState('');
-  const [adminApiKey, setAdminApiKey] = useState('');
-  const [connecting, setConnecting] = useState(false);
-  const [refreshingQr, setRefreshingQr] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [qrCode, setQrCode] = useState<string | null>(null);
-  const [polling, setPolling] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollAttemptsRef = useRef(0);
-
   const isThisProvider = config?.configured && config.provider === 'evolution';
   const connected = isThisProvider && config?.status === 'connected';
+  const savedDisplayName = (isThisProvider && config?.display_name) || '';
 
-  useEffect(() => {
-    if (isThisProvider && config?.base_url) setBaseUrl(config.base_url);
-  }, [isThisProvider, config?.base_url]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [step, setStep] = useState<EvolutionModalStep>('name');
+  const [displayName, setDisplayName] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [connectedPhone, setConnectedPhone] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollAttemptsRef = useRef(0);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
-    setPolling(false);
   }, []);
 
   useEffect(() => stopPolling, [stopPolling]);
@@ -628,7 +637,6 @@ function EvolutionPanel({
   const startPolling = useCallback(() => {
     stopPolling();
     pollAttemptsRef.current = 0;
-    setPolling(true);
     pollRef.current = setInterval(async () => {
       pollAttemptsRef.current += 1;
       try {
@@ -636,12 +644,8 @@ function EvolutionPanel({
         const data = await res.json();
         if (data.status === 'connected') {
           stopPolling();
-          setQrCode(null);
-          toast.success(
-            data.phone_number
-              ? t('evolutionConnectedTo', { phone: data.phone_number })
-              : t('evolutionConnectSuccess'),
-          );
+          setConnectedPhone(typeof data.phone_number === 'string' ? data.phone_number : null);
+          setStep('connected');
           await onSaved();
           return;
         }
@@ -651,55 +655,57 @@ function EvolutionPanel({
       if (pollAttemptsRef.current >= EVOLUTION_POLL_MAX_ATTEMPTS) {
         stopPolling();
         toast.error(t('evolutionPollTimeout'));
+        setModalOpen(false);
       }
     }, EVOLUTION_POLL_INTERVAL_MS);
   }, [onSaved, stopPolling, t]);
 
-  const disabled = !canEdit || !acknowledged;
+  function openConnectModal() {
+    setDisplayName(savedDisplayName);
+    setQrCode(null);
+    setConnectedPhone(null);
+    setStep('name');
+    setModalOpen(true);
+  }
 
-  async function handleConnect() {
-    setConnecting(true);
+  // Reconnect skips straight to generating a fresh QR under the
+  // already-known name — no need to re-ask for it.
+  async function openReconnectModal() {
+    setDisplayName(savedDisplayName);
+    setConnectedPhone(null);
+    setModalOpen(true);
+    await generateQr(savedDisplayName);
+  }
+
+  async function generateQr(nameOverride?: string) {
+    setGenerating(true);
     try {
       const res = await fetch('/api/whatsapp/unofficial/evolution/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          base_url: baseUrl.trim() || undefined,
-          admin_api_key: adminApiKey.trim() || undefined,
-        }),
+        body: JSON.stringify({ display_name: (nameOverride ?? displayName).trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error ?? t('evolutionConnectFailed'));
+        setStep('name');
         return;
       }
-      setAdminApiKey('');
       setQrCode(data.qrcode ?? null);
+      setStep('scan');
       await onSaved();
       startPolling();
     } catch {
       toast.error(t('evolutionConnectFailed'));
+      setStep('name');
     } finally {
-      setConnecting(false);
+      setGenerating(false);
     }
   }
 
-  async function handleRefreshQr() {
-    setRefreshingQr(true);
-    try {
-      const res = await fetch('/api/whatsapp/unofficial/evolution/qr');
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? t('evolutionQrFailed'));
-        return;
-      }
-      setQrCode(data.qrcode ?? null);
-      if (!polling) startPolling();
-    } catch {
-      toast.error(t('evolutionQrFailed'));
-    } finally {
-      setRefreshingQr(false);
-    }
+  function handleModalOpenChange(open: boolean) {
+    if (!open) stopPolling();
+    setModalOpen(open);
   }
 
   async function handleDisconnect() {
@@ -714,8 +720,6 @@ function EvolutionPanel({
         toast.error(data.error ?? t('disconnectFailed'));
         return;
       }
-      stopPolling();
-      setQrCode(null);
       toast.success(t('disconnectSuccess'));
       await onSaved();
     } catch {
@@ -725,125 +729,182 @@ function EvolutionPanel({
     }
   }
 
+  const cardName = savedDisplayName || t('evolutionDefaultName');
+  const disabled = !canEdit || !acknowledged;
+
   return (
     <div className="space-y-6">
-      {isThisProvider && (
-        <Alert className="bg-card border-border">
-          <div className="flex items-center gap-2">
-            {connected ? (
-              <CheckCircle2 className="size-4 text-primary" />
-            ) : (
-              <XCircle className="size-4 text-red-500" />
-            )}
-            <AlertTitle className="text-foreground mb-0">
-              {connected ? t('connected') : t('notConnected')}
-              {config?.phone_number ? ` — ${config.phone_number}` : ''}
-            </AlertTitle>
-          </div>
-          {config?.last_status_error && (
-            <AlertDescription className="text-muted-foreground">
-              {config.last_status_error}
-            </AlertDescription>
-          )}
-        </Alert>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t('evolutionSetupTitle')}</CardTitle>
-          <CardDescription>{t('evolutionSetupDesc')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>{t('evolutionServerUrl')}</Label>
-            <Input
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={t('evolutionServerUrlPlaceholder')}
-              disabled={!canEdit}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>
-              {t('evolutionAdminKey')}{' '}
-              <span className="font-normal text-muted-foreground">{t('optional')}</span>
-            </Label>
-            <Input
-              type="password"
-              value={adminApiKey}
-              onChange={(e) => setAdminApiKey(e.target.value)}
-              placeholder={
-                config?.has_admin_api_key ? t('evolutionAdminKeySaved') : t('evolutionAdminKeyPlaceholder')
-              }
-              disabled={!canEdit}
-              autoComplete="off"
-            />
-          </div>
-
-          {!acknowledged && (
-            <p className="text-xs text-amber-400">{t('acknowledgeRequiredHint')}</p>
-          )}
-
-          <div className="flex flex-wrap gap-3">
-            <Button onClick={handleConnect} disabled={disabled || connecting}>
-              {connecting ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <QrCode className="mr-2 h-4 w-4" />
-              )}
-              {isThisProvider ? t('evolutionReconnect') : t('evolutionConnect')}
-            </Button>
-            {isThisProvider && (
-              <Button
-                variant="outline"
-                onClick={handleRefreshQr}
-                disabled={!canEdit || refreshingQr}
-              >
-                {refreshingQr ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
+      {isThisProvider ? (
+        <Card>
+          <CardContent className="flex items-center justify-between gap-4 py-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
+                <MessageCircle className="size-5 text-emerald-400" />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate font-medium text-foreground">
+                  {cardName}
+                  {config?.phone_number ? ` — ${config.phone_number}` : ''}
+                </p>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <QrCode className="size-3" />
+                  {t('providerEvolution')}
+                  <span
+                    className={`ml-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${
+                      connected
+                        ? 'bg-emerald-500/10 text-emerald-400'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    <span
+                      className={`size-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-muted-foreground'}`}
+                    />
+                    {connected ? t('active') : t('notConnected')}
+                  </span>
+                </div>
+                {config?.last_status_error && (
+                  <p className="mt-0.5 text-xs text-muted-foreground">{config.last_status_error}</p>
                 )}
-                {t('evolutionRefreshQr')}
-              </Button>
-            )}
-            {isThisProvider && (
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {!connected && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openReconnectModal}
+                  disabled={!canEdit}
+                >
+                  <QrCode className="size-4" />
+                  {t('evolutionReconnect')}
+                </Button>
+              )}
               <Button
                 variant="outline"
+                size="sm"
                 onClick={handleDisconnect}
                 disabled={!canEdit || disconnecting}
                 className="border-red-900 text-red-400 hover:text-red-300 hover:bg-red-950/40"
               >
-                {disconnecting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Unplug className="mr-2 h-4 w-4" />
-                )}
+                {disconnecting ? <Loader2 className="size-4 animate-spin" /> : <Unplug className="size-4" />}
                 {t('disconnect')}
               </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {qrCode && !connected && (
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{t('evolutionScanTitle')}</CardTitle>
-            <CardDescription>
-              {polling ? t('evolutionScanDescPolling') : t('evolutionScanDesc')}
-            </CardDescription>
+            <CardTitle className="text-base">{t('evolutionSetupTitle')}</CardTitle>
+            <CardDescription>{t('evolutionSetupDesc')}</CardDescription>
           </CardHeader>
-          <CardContent className="flex justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element -- base64 data URI from Evolution, not a static asset */}
-            <img
-              src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
-              alt={t('evolutionQrAlt')}
-              className="h-64 w-64 rounded-md border border-border bg-white p-2"
-            />
+          <CardContent className="space-y-3">
+            {!acknowledged && (
+              <p className="text-xs text-amber-400">{t('acknowledgeRequiredHint')}</p>
+            )}
+            <Button onClick={openConnectModal} disabled={disabled}>
+              <QrCode className="mr-2 h-4 w-4" />
+              {t('evolutionConnect')}
+            </Button>
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={modalOpen} onOpenChange={handleModalOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('evolutionModalTitle')}</DialogTitle>
+            <DialogDescription>{t('evolutionModalDesc')}</DialogDescription>
+          </DialogHeader>
+
+          <div className="mb-1 flex items-center justify-center gap-2 text-xs">
+            {(['name', 'scan', 'connected'] as const).map((s, i) => (
+              <div key={s} className="flex items-center gap-2">
+                <span
+                  className={`flex size-5 items-center justify-center rounded-full text-[11px] font-bold ${
+                    step === s
+                      ? 'bg-primary text-primary-foreground'
+                      : (['name', 'scan', 'connected'] as const).indexOf(step) > i
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {i + 1}
+                </span>
+                <span className={step === s ? 'text-foreground' : 'text-muted-foreground'}>
+                  {t(`evolutionModalStep_${s}` as 'evolutionModalStep_name')}
+                </span>
+                {i < 2 && <span className="text-muted-foreground">—</span>}
+              </div>
+            ))}
+          </div>
+
+          {step === 'name' && (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>{t('evolutionDisplayName')}</Label>
+                <Input
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder={t('evolutionDisplayNamePlaceholder')}
+                  disabled={!canEdit}
+                  autoFocus
+                />
+              </div>
+              <Button
+                onClick={() => generateQr()}
+                disabled={!canEdit || generating}
+                className="w-full"
+              >
+                {generating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <QrCode className="mr-2 h-4 w-4" />
+                )}
+                {t('evolutionGenerateQr')}
+              </Button>
+            </div>
+          )}
+
+          {step === 'scan' && (
+            <div className="space-y-3">
+              <div className="flex justify-center">
+                {qrCode ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- base64 data URI from Evolution, not a static asset
+                  <img
+                    src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
+                    alt={t('evolutionQrAlt')}
+                    className="h-64 w-64 rounded-md border border-border bg-white p-2"
+                  />
+                ) : (
+                  <div className="flex h-64 w-64 items-center justify-center rounded-md border border-border bg-muted">
+                    <Loader2 className="size-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+              </div>
+              <p className="flex items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                {t('evolutionScanDescPolling')}
+              </p>
+            </div>
+          )}
+
+          {step === 'connected' && (
+            <div className="flex flex-col items-center gap-3 py-4 text-center">
+              <CheckCircle2 className="size-12 text-emerald-400" />
+              <div>
+                <p className="font-medium text-foreground">{t('evolutionConnectSuccess')}</p>
+                {connectedPhone && (
+                  <p className="text-sm text-muted-foreground">{connectedPhone}</p>
+                )}
+              </div>
+              <Button onClick={() => setModalOpen(false)} className="mt-1">
+                {t('done')}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

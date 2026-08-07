@@ -22,7 +22,13 @@ import {
  * persists `base_url`/`admin_api_key`.
  *
  * Body (all optional — falls back to env / the existing saved row):
- *   { base_url?: string, admin_api_key?: string }
+ *   { display_name?: string, base_url?: string, admin_api_key?: string }
+ *
+ * The settings UI never collects `base_url`/`admin_api_key` from the
+ * operator — those come entirely from EVOLUTION_API_URL/EVOLUTION_API_KEY
+ * (set once per deployment in the environment). They remain accepted
+ * here as optional overrides for scripted/API use, not because the UI
+ * exposes them.
  */
 export async function POST(request: Request) {
   try {
@@ -34,12 +40,17 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}) as Record<string, unknown>)
     const bodyBaseUrl = typeof body.base_url === 'string' ? body.base_url.trim() : undefined
     const bodyAdminKey = typeof body.admin_api_key === 'string' ? body.admin_api_key.trim() : undefined
+    const bodyDisplayName = typeof body.display_name === 'string' ? body.display_name.trim() : undefined
 
     const { data: existing } = await supabase
       .from('whatsapp_unofficial_config')
-      .select('id, inbound_token, base_url, admin_api_key, instance_name')
+      .select('id, inbound_token, base_url, admin_api_key, instance_name, display_name')
       .eq('account_id', accountId)
       .maybeSingle()
+
+    // Reconnect reuses the previously-entered name; a fresh connect
+    // without one falls back to a generic label rather than blocking.
+    const displayName = bodyDisplayName || existing?.display_name || 'WhatsApp'
 
     const baseUrl = bodyBaseUrl || existing?.base_url || process.env.EVOLUTION_API_URL?.trim() || ''
     if (!baseUrl) {
@@ -87,6 +98,7 @@ export async function POST(request: Request) {
           status: 'pending',
           base_url: baseUrl,
           admin_api_key: encrypt(resolvedAdminApiKey),
+          display_name: displayName,
         },
         { onConflict: 'account_id' }
       )

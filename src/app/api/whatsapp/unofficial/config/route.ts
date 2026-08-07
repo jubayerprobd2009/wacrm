@@ -27,7 +27,7 @@ import { assertSafeOperatorUrl, SsrfGuardError } from '@/lib/http/ssrf-guard';
 const SELECT_COLUMNS =
   'id, provider, status, is_primary, inbound_token, phone_number, connected_at, ' +
   'last_inbound_at, last_status_error, api_key, webhook_secret, base_url, ' +
-  'admin_api_key, instance_name, instance_token';
+  'admin_api_key, instance_name, instance_token, display_name';
 
 interface WhatsAppUnofficialConfigRow {
   id: string;
@@ -45,6 +45,7 @@ interface WhatsAppUnofficialConfigRow {
   admin_api_key: string | null;
   instance_name: string | null;
   instance_token: string | null;
+  display_name: string | null;
 }
 
 /**
