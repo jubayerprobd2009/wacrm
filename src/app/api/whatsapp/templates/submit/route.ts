@@ -17,6 +17,26 @@ import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
 
 /**
+ * Template submission is Meta-only (Unofficial providers have no
+ * approval concept — see `template-render.ts` / capabilities.templateApproval).
+ * When the account has no `whatsapp_config` row at all, surface a
+ * typed, machine-readable response instead of the generic 400 so
+ * `template-manager.tsx` can distinguish "not connected to Meta"
+ * from a real validation/Meta-API failure and hide the Submit
+ * affordance rather than showing a scary error.
+ */
+function providerUnsupportedResponse() {
+  return NextResponse.json(
+    {
+      error:
+        'WhatsApp Official (Meta) is not connected for this account. Connect it in Settings to submit templates for approval, or send this template as-is over WhatsApp Unofficial.',
+      code: 'provider_unsupported',
+    },
+    { status: 409 },
+  )
+}
+
+/**
  * Shared upsert payload builder — both the Meta-failure path and the
  * Meta-success path write nearly identical rows; dropping the shared
  * fields here means adding a column later only touches one spot.
@@ -144,13 +164,7 @@ export async function POST(request: Request) {
         .eq('account_id', accountId)
         .single()
       if (configError || !config) {
-        return NextResponse.json(
-          {
-            error:
-              'WhatsApp not configured. Connect your WhatsApp Business account in Settings first.',
-          },
-          { status: 400 },
-        )
+        return providerUnsupportedResponse()
       }
       if (!config.waba_id) {
         return NextResponse.json(

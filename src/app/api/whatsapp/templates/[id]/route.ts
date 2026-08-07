@@ -44,6 +44,22 @@ function isDryRun(): boolean {
   )
 }
 
+/**
+ * Editing/deleting a Meta-submitted template is Meta-only. Typed
+ * response so `template-manager.tsx` can key off it — mirrors the
+ * identical helper in `../submit/route.ts` and `../sync/route.ts`.
+ */
+function providerUnsupportedResponse() {
+  return NextResponse.json(
+    {
+      error:
+        'WhatsApp Official (Meta) is not connected for this account.',
+      code: 'provider_unsupported',
+    },
+    { status: 409 },
+  )
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -144,10 +160,7 @@ export async function PATCH(
         .eq('account_id', accountId)
         .single()
       if (configError || !config) {
-        return NextResponse.json(
-          { error: 'WhatsApp not configured.' },
-          { status: 400 },
-        )
+        return providerUnsupportedResponse()
       }
       const accessToken = decrypt(config.access_token)
 
@@ -284,10 +297,7 @@ export async function DELETE(
         .eq('account_id', accountId)
         .single()
       if (configError || !config || !config.waba_id) {
-        return NextResponse.json(
-          { error: 'WhatsApp not configured — cannot delete on Meta.' },
-          { status: 400 },
-        )
+        return providerUnsupportedResponse()
       }
       const accessToken = decrypt(config.access_token)
       try {

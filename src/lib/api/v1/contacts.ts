@@ -67,8 +67,24 @@ export function serializeContact(row: Record<string, unknown>): ApiContact {
  * always attributed to the same human. API callers have no logged-in
  * user, so — like the inbound webhook — we attribute writes to the
  * **WhatsApp config owner** (the webhook's own convention). Contacts
- * can be created before WhatsApp is connected, so we fall back to the
- * account owner when there's no config yet.
+ * can be created before WhatsApp is connected, so we fall back through:
+ *
+ *   1. `whatsapp_config.user_id` (Official/Meta owner)
+ *   2. the account admin (owner preferred, then admin) — same
+ *      `profiles.account_id` + `account_role` lookup pattern
+ *      `GET /api/account/members` uses, and `accounts.owner_user_id`
+ *      as a last-resort defensive fallback in case `profiles` ever
+ *      drifts from that denormalized column.
+ *
+ * DEVIATION FROM PLAN: the plan's checklist (Phase 7 / "sixth site
+ * found during exploration") describes this chain as `whatsapp_config
+ * .user_id` -> `whatsapp_unofficial_config.user_id` -> account admin.
+ * `whatsapp_unofficial_config` (047_whatsapp_unofficial_config.sql) has
+ * no `user_id` column — it's account-scoped only (no per-connection
+ * "owner" concept, unlike `whatsapp_config`) — so that middle step is
+ * skipped; an unofficial-only account falls straight through to the
+ * account admin, which still fully fixes the original bug (an
+ * unofficial-only account no longer resolves to nothing).
  */
 export async function resolveAuditUserId(
   db: SupabaseClient,
@@ -82,16 +98,34 @@ export async function resolveAuditUserId(
   const configOwner = config?.user_id as string | undefined;
   if (configOwner) return configOwner;
 
+  // No Official config (or it has no owner on file) — fall back to the
+  // account admin. Prefer 'owner' over 'admin' so writes are attributed
+  // to the most senior human when both exist.
+  const { data: admins } = await db
+    .from('profiles')
+    .select('user_id, account_role')
+    .eq('account_id', accountId)
+    .in('account_role', ['owner', 'admin']);
+  const adminRows = (admins ?? []) as { user_id: string; account_role: string }[];
+  const owner = adminRows.find((r) => r.account_role === 'owner');
+  if (owner) return owner.user_id;
+  const admin = adminRows.find((r) => r.account_role === 'admin');
+  if (admin) return admin.user_id;
+
+  // Defensive last resort: `accounts.owner_user_id` is a denormalized
+  // copy of the same fact (see 017_account_sharing.sql) — covers the
+  // case of a `profiles` row that predates a backfill or was hand-
+  // inserted without `account_role` set.
   const { data: account } = await db
     .from('accounts')
     .select('owner_user_id')
     .eq('id', accountId)
     .maybeSingle();
-  const owner = account?.owner_user_id as string | undefined;
-  if (!owner) {
+  const fallbackOwner = account?.owner_user_id as string | undefined;
+  if (!fallbackOwner) {
     throw new ContactError('Account owner could not be resolved', 500);
   }
-  return owner;
+  return fallbackOwner;
 }
 
 export interface ContactInput {

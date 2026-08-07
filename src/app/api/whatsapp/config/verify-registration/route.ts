@@ -62,10 +62,17 @@ export async function GET() {
     .maybeSingle()
 
   if (!config) {
+    // Meta-only diagnostic — this account may still be fully
+    // operational via WhatsApp Unofficial. `code: 'provider_unsupported'`
+    // lets the UI distinguish "no Official config" from a real
+    // registration failure without changing this endpoint's documented
+    // always-200 contract (it renders diagnostic detail, not an error
+    // toast).
     return NextResponse.json({
       live: false,
       checks: { config_exists: false },
       message: 'No WhatsApp configuration saved yet.',
+      code: 'provider_unsupported',
     })
   }
 

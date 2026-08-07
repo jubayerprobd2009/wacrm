@@ -6,6 +6,17 @@ import { MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Loader2, FileText, ArrowRight } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { useWhatsAppConnection } from '@/hooks/use-whatsapp-connection';
+
+// Only Meta requires (and can even represent) an approval workflow —
+// WaSenderAPI/Evolution send a local template row as plain text via
+// `template-render.ts` with no approval concept at all (mirrors
+// `ProviderCapabilities.templateApproval` in
+// src/lib/whatsapp/providers/types.ts, which this client component
+// can't import directly since it's server-oriented).
+function hasTemplateApproval(activeProvider: string | null | undefined): boolean {
+  return activeProvider === 'meta';
+}
 
 const categoryColors: Record<string, string> = {
   Marketing: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
@@ -25,19 +36,34 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { summary: connectionSummary, loading: connectionLoading } =
+    useWhatsAppConnection();
 
   useEffect(() => {
+    // Wait for the connection summary — it decides which filter to
+    // apply, and re-running the query once it resolves is cheap and
+    // beats guessing (and refetching) with the wrong filter first.
+    if (connectionLoading) return;
+
     async function fetchTemplates() {
       try {
         const supabase = createClient();
-        // Only APPROVED templates can be sent via Meta — anything else
-        // would 400 at broadcast time. Hide them rather than letting
-        // the user pick a template that will fail.
-        const { data, error: fetchError } = await supabase
+        let query = supabase
           .from('message_templates')
           .select('*')
-          .eq('status', 'APPROVED')
           .order('created_at', { ascending: false });
+
+        // Only APPROVED templates can be sent via Meta — anything else
+        // would 400 at broadcast time, so hide them rather than letting
+        // the user pick a template that will fail. Unofficial providers
+        // have no approval workflow at all (template-render.ts renders
+        // any local row to plain text), so every local template is a
+        // valid broadcast pick there regardless of `status`.
+        if (hasTemplateApproval(connectionSummary?.active_provider)) {
+          query = query.eq('status', 'APPROVED');
+        }
+
+        const { data, error: fetchError } = await query;
 
         if (fetchError) throw fetchError;
         setTemplates(data ?? []);
@@ -49,9 +75,9 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
     }
 
     fetchTemplates();
-  }, []);
+  }, [connectionLoading, connectionSummary?.active_provider, t]);
 
-  if (loading) {
+  if (loading || connectionLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -109,9 +135,22 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
                 <p className="line-clamp-3 text-xs text-muted-foreground">{template.body_text}</p>
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                   <span>{template.language ?? 'en_US'}</span>
-                  {/* Status is omitted on purpose — every template
-                      shown here is already filtered to APPROVED,
-                      so the chip carried no information. */}
+                  {/* When the active provider requires Meta approval,
+                      every row here is already filtered to APPROVED so
+                      the chip carries no information — omit it. On an
+                      unofficial-only account there's no approval
+                      concept at all: it always sends, so label it
+                      "Ready to send" instead of the raw (often DRAFT)
+                      local status, which would misleadingly read as
+                      unfinished/blocked. */}
+                  {!hasTemplateApproval(connectionSummary?.active_provider) && (
+                    // Hardcoded rather than a new i18n key — i18n message
+                    // files are owned by a parallel agent in this phase
+                    // (see plan Phase 9); wire this into `messages/*.json`
+                    // as `Broadcasts.wizard.chooseTemplate.readyToSend`
+                    // in that follow-up.
+                    <span className="text-emerald-400">Ready to send</span>
+                  )}
                 </div>
               </button>
             );

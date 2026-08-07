@@ -52,6 +52,18 @@ import {
   extractVariableIndices,
   TEMPLATE_LIMITS,
 } from '@/lib/whatsapp/template-validators';
+import { useWhatsAppConnection } from '@/hooks/use-whatsapp-connection';
+
+// Only Meta has an approval workflow (`ProviderCapabilities.templateApproval`
+// in src/lib/whatsapp/providers/types.ts) — WaSenderAPI/Evolution send a
+// local row as plain text via `template-render.ts` with no submission,
+// no quality score, no PENDING/REJECTED/PAUSED states. This client
+// component can't import the server-oriented provider types module
+// directly, so it mirrors the flag with the one fact that determines
+// it: whether Meta is the active provider.
+function hasTemplateApproval(activeProvider: string | null | undefined): boolean {
+  return activeProvider === 'meta';
+}
 
 const CATEGORIES = ['Marketing', 'Utility', 'Authentication'] as const;
 type HeaderFormat = 'none' | 'text' | 'image' | 'video' | 'document';
@@ -128,6 +140,8 @@ export function TemplateManager() {
   const t = useTranslations('Settings.templates');
   const supabase = createClient();
   const { user, loading: authLoading } = useAuth();
+  const { summary: connectionSummary } = useWhatsAppConnection();
+  const templateApproval = hasTemplateApproval(connectionSummary?.active_provider);
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -274,6 +288,14 @@ export function TemplateManager() {
       });
       const data = await res.json();
       if (!res.ok) {
+        // Typed response from the /submit and /[id] routes when the
+        // account has no WhatsApp Official (Meta) connection — surface
+        // a clearer, actionable message than the raw server error.
+        if (data?.code === 'provider_unsupported') {
+          throw new Error(
+            'This account only has WhatsApp Unofficial connected. Connect WhatsApp Official in Settings to submit templates for Meta approval.',
+          );
+        }
         throw new Error(
           data?.error || `${isEdit ? 'Edit' : 'Submit'} failed (HTTP ${res.status})`,
         );
@@ -488,15 +510,20 @@ export function TemplateManager() {
         description={t('description')}
         action={
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={handleSyncFromMeta}
-              disabled={syncing}
-              title={t('syncTitle')}
-            >
-              <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? t('syncing') : t('syncFromMeta')}
-            </Button>
+            {/* Meta-only affordance — hidden (not removed) when the
+                active provider has no approval workflow to sync from;
+                reappears the instant Official is connected. */}
+            {templateApproval && (
+              <Button
+                variant="outline"
+                onClick={handleSyncFromMeta}
+                disabled={syncing}
+                title={t('syncTitle')}
+              >
+                <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? t('syncing') : t('syncFromMeta')}
+              </Button>
+            )}
             <Button onClick={openCreate}>
               <Plus className="size-4" />
               {t('newTemplate')}
@@ -530,15 +557,30 @@ export function TemplateManager() {
                       >
                         {template.category}
                       </Badge>
-                      <Badge className={`text-xs border ${status.classes}`}>
-                        {status.label}
-                      </Badge>
+                      {templateApproval ? (
+                        <Badge className={`text-xs border ${status.classes}`}>
+                          {status.label}
+                        </Badge>
+                      ) : (
+                        // No approval workflow on this provider — every
+                        // local row sends as-is (template-render.ts),
+                        // so the Meta status enum (DRAFT/PENDING/...)
+                        // would read as "broken" rather than "normal".
+                        // Hardcoded rather than a new i18n key — message
+                        // files are owned by a parallel agent this phase
+                        // (see plan Phase 9); wire this into
+                        // `messages/*.json` as `Settings.templates.readyToSend`
+                        // in that follow-up.
+                        <Badge className="text-xs border bg-emerald-600/20 text-emerald-400 border-emerald-600/30">
+                          Ready to send
+                        </Badge>
+                      )}
                       {template.language && (
                         <span className="text-xs text-muted-foreground uppercase">
                           {template.language}
                         </span>
                       )}
-                      {template.quality_score && (
+                      {templateApproval && template.quality_score && (
                         <span
                           className={`text-[10px] uppercase font-medium ${
                             template.quality_score === 'GREEN'

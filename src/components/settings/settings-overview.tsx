@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { useTheme } from '@/hooks/use-theme';
+import { useWhatsAppConnection } from '@/hooks/use-whatsapp-connection';
 import { THEMES } from '@/lib/themes';
 import { CURRENCIES } from '@/lib/currency';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -45,19 +46,24 @@ export function SettingsOverview({
 
   const [counts, setCounts] = useState<OverviewCounts | null>(null);
   const [countsLoading, setCountsLoading] = useState(true);
-  // WhatsApp status is tracked separately: its health check decrypts the
-  // token and pings Meta, which is far slower than the cheap count
-  // queries. Gating it independently keeps a slow/flaky Meta round-trip
-  // from blanking the rest of the landing.
-  const [whatsapp, setWhatsapp] = useState<WhatsAppStatus | null>(null);
-  const [whatsappLoading, setWhatsappLoading] = useState(true);
+  // WhatsApp Official tile status now comes from the shared aggregate
+  // connection endpoint/hook (backs every "is WhatsApp connected" UI
+  // surface — see src/hooks/use-whatsapp-connection.ts) instead of a
+  // direct `whatsapp_config` read, so this tile and the inbox banner
+  // never disagree.
+  const { summary: whatsappSummary, loading: whatsappLoading } = useWhatsAppConnection();
+  const whatsapp: WhatsAppStatus | null = whatsappSummary
+    ? { configured: whatsappSummary.official.configured, connected: whatsappSummary.official.connected }
+    : null;
+  const whatsappUnofficial: WhatsAppStatus | null = whatsappSummary
+    ? { configured: whatsappSummary.unofficial.configured, connected: whatsappSummary.unofficial.connected }
+    : null;
 
   useEffect(() => {
     if (!user || !accountId) return;
     let cancelled = false;
     const supabase = createClient();
     const userId = user.id;
-    const acctId = accountId;
 
     // Cheap counts — resolve fast, render immediately.
     (async () => {
@@ -117,25 +123,6 @@ export function SettingsOverview({
       setCountsLoading(false);
     })();
 
-    // WhatsApp connection status — slower, independent.
-    (async () => {
-      setWhatsappLoading(true);
-      const [row, health] = await Promise.allSettled([
-        supabase
-          .from('whatsapp_config')
-          .select('phone_number_id')
-          .eq('account_id', acctId)
-          .maybeSingle(),
-        fetch('/api/whatsapp/config', { cache: 'no-store' }).then((r) => r.json()),
-      ]);
-      if (cancelled) return;
-      setWhatsapp({
-        configured: row.status === 'fulfilled' && !!row.value.data?.phone_number_id,
-        connected: health.status === 'fulfilled' && !!health.value?.connected,
-      });
-      setWhatsappLoading(false);
-    })();
-
     return () => {
       cancelled = true;
     };
@@ -164,6 +151,21 @@ export function SettingsOverview({
       subtitle: !whatsapp?.configured ? (
         t('notSetup')
       ) : whatsapp.connected ? (
+        <>
+          <StatusDot tone="ok" /> {t('connected')}
+        </>
+      ) : (
+        <>
+          <StatusDot tone="muted" /> {t('needsReconnecting')}
+        </>
+      ),
+    },
+    {
+      section: 'whatsapp-unofficial',
+      loading: whatsappLoading,
+      subtitle: !whatsappUnofficial?.configured ? (
+        t('notSetup')
+      ) : whatsappUnofficial.connected ? (
         <>
           <StatusDot tone="ok" /> {t('connected')}
         </>

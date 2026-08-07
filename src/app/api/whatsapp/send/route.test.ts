@@ -51,12 +51,17 @@ function makeSupabaseMock() {
           // its contact); otherwise fall back to the canned existing row.
           return { data: createdConversation ?? existingConversation, error: null }
         case 'whatsapp_config':
+          // `getProviderForAccount` (src/lib/whatsapp/providers/resolve.ts)
+          // gates on `status === 'connected'` — every real row does carry
+          // a status (DB default 'disconnected', flipped to 'connected'
+          // by the connect flow), so the mock must too.
           return {
             data: {
               id: 'cfg-1',
               account_id: 'acct-1',
               phone_number_id: 'PNID-1',
               access_token: 'enc-token',
+              status: 'connected',
             },
             error: null,
           }

@@ -18,8 +18,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
-import { decrypt } from '@/lib/crypto/encryption';
+import { getProviderForAccount } from '@/lib/whatsapp/providers/resolve';
+import type { WhatsAppProvider } from '@/lib/whatsapp/providers/types';
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -66,8 +66,11 @@ export interface BroadcastPlan {
   broadcastId: string;
   templateName: string;
   templateLanguage: string;
-  phoneNumberId: string;
-  accessToken: string;
+  /** Resolved provider adapter (Meta today; wasender/evolution once
+   *  those adapters land) rather than raw phoneNumberId/accessToken —
+   *  `deliverBroadcast` sends through this without knowing which
+   *  provider backs it. */
+  provider: WhatsAppProvider;
   templateRow: MessageTemplate | null;
   planned: PlannedRecipient[];
   /** Phones rejected up front (invalid E.164) — counted as failed. */
@@ -75,6 +78,24 @@ export interface BroadcastPlan {
 }
 
 const MAX_RECIPIENTS = 1000;
+
+// ------------------------------------------------------------
+// Outbound pacing (capabilities.outboundPacing — WaSenderAPI/Evolution)
+//
+// `src/lib/rate-limit.ts`'s `checkRateLimit` is a fixed-window
+// accept/reject counter for gating *incoming HTTP requests*, not a
+// sleep primitive — there's nothing to "reject" inside a broadcast's
+// own sequential send loop, we just want to slow it down. So pacing
+// is a small local jittered delay rather than a rate-limit.ts call;
+// the budget numbers below follow the same "tweak in one place, not
+// at call sites" convention as `RATE_LIMITS` in that file.
+// ------------------------------------------------------------
+const BROADCAST_PACING_MIN_MS = 3_000;
+const BROADCAST_PACING_JITTER_MS = 3_000; // delay ranges [3s, 6s)
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Validate + persist a broadcast, resolving each recipient to a
@@ -109,21 +130,21 @@ export async function createBroadcast(
     );
   }
 
-  // Config (fail fast + provides the audit trail owner already resolved
-  // by the caller). Meta send needs phone_number_id + decrypted token.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
-  if (configError || !config) {
+  // Provider (fail fast + provides the audit trail owner already
+  // resolved by the caller). getProviderForAccount throws
+  // SendMessageError('whatsapp_not_configured', ...) — translated to
+  // BroadcastError here so callers keep seeing the same error shape
+  // this function has always thrown.
+  let provider: WhatsAppProvider;
+  try {
+    provider = await getProviderForAccount(db, accountId);
+  } catch {
     throw new BroadcastError(
       'whatsapp_not_configured',
       'WhatsApp not configured. Please set up your WhatsApp integration first.',
       400
     );
   }
-  const accessToken = decrypt(config.access_token);
 
   // Template row (once) for header/button components; guard a
   // malformed local row rather than N identical opaque failures.
@@ -238,8 +259,7 @@ export async function createBroadcast(
     broadcastId: broadcast.id,
     templateName,
     templateLanguage,
-    phoneNumberId: config.phone_number_id,
-    accessToken,
+    provider,
     templateRow,
     planned,
     rejected,
@@ -264,17 +284,31 @@ export async function deliverBroadcast(
   plan: BroadcastPlan
 ): Promise<void> {
   let sentCount = 0;
+  let isFirstSend = true;
 
   for (const recipient of plan.planned) {
-    const variants = phoneVariants(recipient.phone);
+    // Unofficial providers (`capabilities.outboundPacing`) risk a ban
+    // if blasted un-throttled — space sends ~3-6s apart with jitter so
+    // the traffic pattern doesn't look scripted. Meta has no such
+    // requirement (outboundPacing: false), so Official broadcasts keep
+    // firing back-to-back exactly as before. Skipped before the first
+    // send so a 1-recipient broadcast isn't delayed for nothing.
+    if (plan.provider.capabilities.outboundPacing && !isFirstSend) {
+      await sleep(BROADCAST_PACING_MIN_MS + Math.random() * BROADCAST_PACING_JITTER_MS);
+    }
+    isFirstSend = false;
+
+    // Only retry across phone-number variants when the provider says
+    // it needs that (Meta today); other providers send once.
+    const variants = plan.provider.capabilities.phoneVariantRetry
+      ? phoneVariants(recipient.phone)
+      : [recipient.phone];
     let sentMessageId: string | null = null;
     let lastError: string | null = null;
 
     for (const variant of variants) {
       try {
-        const result = await sendTemplateMessage({
-          phoneNumberId: plan.phoneNumberId,
-          accessToken: plan.accessToken,
+        const result = await plan.provider.sendTemplate({
           to: variant,
           templateName: plan.templateName,
           language: plan.templateLanguage,

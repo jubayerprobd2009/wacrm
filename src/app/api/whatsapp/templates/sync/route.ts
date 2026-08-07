@@ -25,6 +25,23 @@ import type { TemplateButton, TemplateSampleValues } from '@/types'
 const META_API_VERSION = 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
+/**
+ * "Sync from Meta" is a Meta-only affordance. When the account has no
+ * `whatsapp_config` row, return a typed response `template-manager.tsx`
+ * can key off (capabilities.templateApproval === false) instead of the
+ * generic 400 — mirrors the identical helper in `../submit/route.ts`.
+ */
+function providerUnsupportedResponse() {
+  return NextResponse.json(
+    {
+      error:
+        'WhatsApp Official (Meta) is not connected for this account. Connect it in Settings to sync templates from Meta.',
+      code: 'provider_unsupported',
+    },
+    { status: 409 },
+  )
+}
+
 interface MetaButton {
   type: string
   text: string
@@ -142,13 +159,7 @@ export async function POST() {
       .single()
 
     if (configError || !config) {
-      return NextResponse.json(
-        {
-          error:
-            'WhatsApp not configured. Connect your WhatsApp Business account in Settings first.',
-        },
-        { status: 400 },
-      )
+      return providerUnsupportedResponse()
     }
 
     if (!config.waba_id) {

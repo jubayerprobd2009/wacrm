@@ -393,6 +393,15 @@ export function WhatsAppConfig() {
         title={t("title")}
         description={t("description")}
       />
+      <p className="mb-4 text-sm text-muted-foreground">
+        {t('notVerifiedWithMeta')}{' '}
+        <a
+          href="/settings?tab=whatsapp-unofficial"
+          className="text-primary hover:text-primary/80 underline underline-offset-2"
+        >
+          {t('useUnofficialLink')}
+        </a>
+      </p>
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       {/* Main config form */}
       <div className="space-y-6">

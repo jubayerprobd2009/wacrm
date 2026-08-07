@@ -287,6 +287,41 @@ export interface WhatsAppConfig {
   last_registration_error?: string;
 }
 
+/** Which connection path a message/config is using. `channel` on
+ *  conversations/messages stays `'whatsapp'` for all three — provider
+ *  lives on the config row only (see 047_whatsapp_unofficial_config.sql). */
+export type WhatsAppProviderId = 'meta' | 'wasender' | 'evolution';
+
+export interface WhatsAppUnofficialConfig {
+  id: string;
+  account_id: string;
+  provider: 'wasender' | 'evolution';
+  status: 'connected' | 'disconnected' | 'pending';
+  /** Explicit primary-sending switch when both Official and
+   *  Unofficial are connected — no silent default. */
+  is_primary: boolean;
+  /** Opaque per-account webhook path segment. */
+  inbound_token: string;
+  phone_number?: string | null;
+  connected_at?: string | null;
+  /** Drives a "webhook verified" checkmark in the UI. */
+  last_inbound_at?: string | null;
+  last_status_error?: string | null;
+
+  // WaSenderAPI fields (encrypted at rest — see src/lib/crypto/encryption.ts)
+  api_key?: string | null;
+  webhook_secret?: string | null;
+
+  // Evolution API fields (admin_api_key / instance_token encrypted at rest)
+  base_url?: string | null;
+  admin_api_key?: string | null;
+  instance_name?: string | null;
+  instance_token?: string | null;
+
+  created_at: string;
+  updated_at: string;
+}
+
 // Raw Meta status enum. We persist this verbatim from Meta (sync + webhook)
 // rather than collapsing to a local TitleCase set — distinctions like
 // PAUSED vs DISABLED vs IN_APPEAL drive the edit/resubmit/delete flows.

@@ -12,6 +12,7 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
+import { WhatsAppUnofficialConfig } from '@/components/settings/whatsapp-unofficial-config';
 import { SmsConfig } from '@/components/settings/sms-config';
 import { GoogleConfig } from '@/components/settings/google-config';
 import { AiConfig } from '@/components/settings/ai-config';
@@ -91,6 +92,7 @@ function SettingsPageInner() {
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
     whatsapp: <WhatsAppConfig />,
+    'whatsapp-unofficial': <WhatsAppUnofficialConfig />,
     sms: <SmsConfig />,
     google: <GoogleConfig />,
     ai: <AiConfig />,

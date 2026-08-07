@@ -24,6 +24,7 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 import { SendMessageError } from '@/lib/whatsapp/send-message';
 import { resolveAuditUserId, ContactError } from '@/lib/api/v1/contacts';
+import { isWhatsAppConnected } from '@/lib/whatsapp/providers/resolve';
 
 export interface ResolvedConversation {
   conversationId: string;
@@ -54,13 +55,12 @@ export async function resolveConversationByPhone(
   }
 
   // Fail fast (and create nothing) when the account has no WhatsApp
-  // connected — the same error the send would raise anyway.
-  const { data: config } = await db
-    .from('whatsapp_config')
-    .select('id')
-    .eq('account_id', accountId)
-    .maybeSingle();
-  if (!config) {
+  // connected — the same error the send would raise anyway. Checks
+  // BOTH Official and Unofficial (see `isWhatsAppConnected` /
+  // Phase 7 of the plan) so an unofficial-only account's public-API
+  // sends aren't wrongly rejected as "not configured".
+  const connected = await isWhatsAppConnected(db, accountId);
+  if (!connected) {
     throw new SendMessageError(
       'whatsapp_not_configured',
       'WhatsApp not configured. Please set up your WhatsApp integration first.',

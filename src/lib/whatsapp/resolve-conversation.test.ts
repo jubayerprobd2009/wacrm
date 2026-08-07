@@ -12,7 +12,20 @@ import { SendMessageError } from './send-message';
 type ContactRow = { id: string; phone: string; name?: string | null };
 
 interface Script {
-  config?: { user_id: string } | null; // whatsapp_config.maybeSingle
+  // whatsapp_config.maybeSingle — read by both `resolveAuditUserId`
+  // (user_id) and, since the Phase 7 refactor, `isWhatsAppConnected`
+  // (status) via `resolve.ts`'s `fetchWhatsAppConfig(select('*'))`.
+  config?: { user_id: string; status?: 'connected' | 'disconnected' } | null;
+  /** whatsapp_unofficial_config.maybeSingle — read by `isWhatsAppConnected`
+   *  so an unofficial-only account (no `whatsapp_config` row at all)
+   *  is still recognized as connected. */
+  unofficialConfig?: { status?: 'connected' | 'disconnected' | 'pending' } | null;
+  /** profiles.select().eq().in() — the account-admin fallback
+   *  `resolveAuditUserId` falls through to when there's no
+   *  `whatsapp_config` owner (e.g. an unofficial-only account). */
+  admins?: { user_id: string; account_role: string }[];
+  /** accounts.maybeSingle() — the final defensive fallback. */
+  accountOwner?: { owner_user_id: string } | null;
   contactCandidates?: ContactRow[]; // contacts .like (same every call)
   /** Per-call `.like` results — overrides contactCandidates. Lets a
    *  test simulate "miss, then hit" for the unique-race path. */
@@ -46,6 +59,10 @@ function makeDb(script: Script): SupabaseClient {
       return builder;
     },
     eq: () => builder,
+    in: () =>
+      table === 'profiles'
+        ? Promise.resolve({ data: script.admins ?? [], error: null })
+        : Promise.resolve({ data: [], error: null }),
     order: () => builder,
     limit: () => {
       // Only the conversation lookup terminates on `.limit(1)`.
@@ -68,6 +85,10 @@ function makeDb(script: Script): SupabaseClient {
     maybeSingle: () => {
       if (table === 'whatsapp_config')
         return Promise.resolve({ data: script.config ?? null, error: null });
+      if (table === 'whatsapp_unofficial_config')
+        return Promise.resolve({ data: script.unofficialConfig ?? null, error: null });
+      if (table === 'accounts')
+        return Promise.resolve({ data: script.accountOwner ?? null, error: null });
       return Promise.resolve({ data: null, error: null });
     },
     single: () => {
@@ -134,9 +155,28 @@ describe('resolveConversationByPhone', () => {
     ).rejects.toBeInstanceOf(SendMessageError);
   });
 
+  it('succeeds for an unofficial-only account (no whatsapp_config row at all)', async () => {
+    // Phase 7: the gate is isWhatsAppConnected() (official OR
+    // unofficial), not a direct whatsapp_config read — this is the
+    // regression this change targets.
+    const db = makeDb({
+      config: null,
+      unofficialConfig: { status: 'connected' },
+      admins: [{ user_id: 'the-admin', account_role: 'admin' }],
+      contactCandidates: [{ id: 'c1', phone: '14155550123' }],
+      existingConversation: { id: 'cv1' },
+    });
+    const res = await resolveConversationByPhone(db, 'acct', '+14155550123');
+    expect(res).toEqual({
+      conversationId: 'cv1',
+      contactId: 'c1',
+      contactCreated: false,
+    });
+  });
+
   it('returns the existing contact + conversation without creating', async () => {
     const db = makeDb({
-      config: { user_id: 'owner-1' },
+      config: { user_id: 'owner-1', status: 'connected' },
       contactCandidates: [{ id: 'c1', phone: '14155550123' }],
       existingConversation: { id: 'cv1' },
     });
@@ -154,7 +194,7 @@ describe('resolveConversationByPhone', () => {
 
   it('creates contact + conversation when none exist', async () => {
     const db = makeDb({
-      config: { user_id: 'owner-1' },
+      config: { user_id: 'owner-1', status: 'connected' },
       contactCandidates: [],
       insertedContactId: 'c2',
       existingConversation: null,
@@ -178,7 +218,7 @@ describe('resolveConversationByPhone', () => {
     // 23505 unique violation, and the post-race re-lookup now returns
     // the row a concurrent writer created.
     const db = makeDb({
-      config: { user_id: 'owner-1' },
+      config: { user_id: 'owner-1', status: 'connected' },
       contactCandidatesByCall: [[], [{ id: 'c-raced', phone: '14155550123' }]],
       insertContactError: { code: '23505' },
       existingConversation: { id: 'cv-raced' },
@@ -195,7 +235,7 @@ describe('resolveConversationByPhone', () => {
     // post-race re-lookup returns the winning conversation — no duplicate
     // conversation is created (issue #363).
     const db = makeDb({
-      config: { user_id: 'owner-1' },
+      config: { user_id: 'owner-1', status: 'connected' },
       contactCandidates: [{ id: 'c1', phone: '14155550123' }],
       existingConversationByCall: [null, { id: 'cv-raced' }],
       insertConversationError: { code: '23505' },
