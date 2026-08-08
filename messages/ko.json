@@ -1774,7 +1774,21 @@
       "saveSuccess": "AI 어시스턴트가 저장되었습니다.",
       "saveFailed": "저장하지 못했습니다.",
       "removeSuccess": "AI 설정이 제거되었습니다.",
-      "removeFailed": "제거하지 못했습니다."
+      "removeFailed": "제거하지 못했습니다.",
+      "modelPickerPlaceholder": "모델 선택...",
+      "modelSearchPlaceholder": "모델 검색...",
+      "modelsLoading": "모델 불러오는 중...",
+      "modelsNeedKeyHint": "실시간 모델 목록을 불러오려면 위에 API 키를 (다시) 입력하세요.",
+      "modelsNoMatch": "검색과 일치하는 모델이 없습니다.",
+      "modelsFetchFailed": "모델 목록을 불러오지 못했습니다 — 모델 ID를 직접 입력하세요.",
+      "modelEnterManually": "모델 ID 직접 입력",
+      "modelPickerBrowse": "모델 찾아보기",
+      "modelManualHint": "모델 ID를 직접 입력하는 중입니다. 검색 아이콘을 클릭하면 실시간 목록을 볼 수 있습니다 (새로 입력한 API 키 필요).",
+      "aiSelfDiscloses": "AI임을 밝히기",
+      "aiSelfDisclosesDesc": "켜면 질문받았을 때 어시스턴트가 AI임을 밝힙니다. 끄면 정체에 대해 중립을 유지합니다.",
+      "optOutAppliesToWhatsapp": "수신거부 문구를 WhatsApp에도 적용",
+      "optOutAppliesToWhatsappDesc": "켜면 \"연락하지 마세요\", \"관심 없어요\" 같은 문구가 SMS뿐 아니라 WhatsApp에서도 발송을 중단시킵니다.",
+      "businessContextKbHint": "통신사/상품 세부정보와 FAQ는 여기에 붙여넣지 말고 아래 지식베이스를 사용하세요 — 관련 질문에 자동으로 검색되어 반영됩니다."
     },
     "aiKnowledge": {
       "loadFailed": "지식베이스를 불러오지 못했습니다",

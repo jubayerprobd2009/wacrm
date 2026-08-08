@@ -26,6 +26,7 @@ import { findOrCreateContact } from './contacts'
 import { findOrCreateConversation, flagBroadcastReplyIfAny } from './conversations'
 import { handleReaction, lookupInternalIdByMetaId } from './reactions'
 import { resolveEmulatedInteractiveReply } from '@/lib/whatsapp/providers/interactive-fallback'
+import { isOptOutMessage, shouldApplyOptOutToWhatsapp } from '@/lib/compliance/opt-out'
 import type { InboundConnection, NormalizedInboundMessage } from './types'
 
 // The messages.content_type CHECK constraint (widened in migration 010
@@ -88,6 +89,27 @@ export async function processInboundMessage(
 
   const contentText = message.text
   const mediaUrl = message.media?.url ?? null
+
+  // Opt-out phrase detection (client's compliance document listed
+  // phrases beyond the SMS-side STOP-family keywords — see
+  // src/lib/compliance/opt-out.ts). SMS always runs this; WhatsApp
+  // only when the account has opted in via `opt_out_applies_to_whatsapp`
+  // (default on). Mirrors the SMS webhook's fields exactly
+  // (do_not_contact + do_not_contact_at) so the compliance record is
+  // consistent regardless of channel. This only sets the flag — it
+  // does not (yet) suppress AI pitching on WhatsApp the way the SMS
+  // two-stage assistant's `suppressPitch` does; that would need
+  // `buildSystemPrompt`/auto-reply to grow the same concept, which is
+  // a larger, separate change.
+  if (contentText && (await shouldApplyOptOutToWhatsapp(supabaseAdmin(), accountId)) && isOptOutMessage(contentText)) {
+    const { error: optOutErr } = await supabaseAdmin()
+      .from('contacts')
+      .update({ do_not_contact: true, do_not_contact_at: new Date().toISOString() })
+      .eq('id', contactRecord.id)
+    if (optOutErr) {
+      console.error('[inbound] failed to record WhatsApp opt-out:', optOutErr)
+    }
+  }
 
   // Emulated-interactive fallback: providers without real tappable
   // buttons/lists (nativeInteractive === false) render menus as

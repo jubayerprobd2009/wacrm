@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Sparkles, CheckCircle2, Trash2, Eye, EyeOff } from 'lucide-react';
+import {
+  Loader2,
+  Sparkles,
+  CheckCircle2,
+  Trash2,
+  Eye,
+  EyeOff,
+  Search,
+  ChevronsUpDown,
+  Pencil,
+} from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 import { Button } from '@/components/ui/button';
@@ -24,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { SettingsPanelHead } from './settings-panel-head';
 import { AiKnowledgeCard } from './ai-knowledge';
 import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
@@ -41,12 +52,207 @@ const HANDOFF_QUEUE = '__queue__';
 const PROVIDER_LABEL: Record<AiProvider, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic (Claude)',
+  openrouter: 'OpenRouter',
 };
 
 const KEY_PLACEHOLDER: Record<AiProvider, string> = {
   openai: 'sk-...',
   anthropic: 'sk-ant-...',
+  openrouter: 'sk-or-...',
 };
+
+interface ModelOption {
+  id: string;
+  label?: string;
+}
+
+/**
+ * Searchable model picker, populated live from `/api/ai/models` once
+ * the operator has typed an API key — no client bundles a model-list
+ * dependency for this (no Command/Combobox primitive existed in this
+ * repo yet), so it's a small custom Popover + filtered list. Falls
+ * back to a plain text input (toggle via the pencil icon) so a fetch
+ * failure or an unlisted/very-new model id never blocks saving.
+ */
+function ModelPicker({
+  provider,
+  model,
+  onModelChange,
+  apiKeyForFetch,
+  disabled,
+}: {
+  provider: AiProvider;
+  model: string;
+  onModelChange: (id: string) => void;
+  /** The plaintext key to fetch models with — undefined when the
+   *  stored key hasn't been re-entered this session (fetch is disabled
+   *  in that case; typing the model id manually still works). */
+  apiKeyForFetch: string | undefined;
+  disabled: boolean;
+}) {
+  const t = useTranslations('Settings.aiConfig');
+  const [manualMode, setManualMode] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+  const fetchedForRef = useRef<string | null>(null);
+
+  const fetchModels = useCallback(async () => {
+    if (!apiKeyForFetch) return;
+    setFetchState('loading');
+    try {
+      const res = await fetch('/api/ai/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, api_key: apiKeyForFetch }),
+      });
+      const data = await res.json();
+      if (!res.ok || !Array.isArray(data.models)) {
+        setFetchState('error');
+        setManualMode(true);
+        toast.error(data.error ?? t('modelsFetchFailed'));
+        return;
+      }
+      setModels(data.models);
+      setFetchState('loaded');
+      fetchedForRef.current = `${provider}:${apiKeyForFetch}`;
+    } catch {
+      setFetchState('error');
+      setManualMode(true);
+      toast.error(t('modelsFetchFailed'));
+    }
+  }, [provider, apiKeyForFetch, t]);
+
+  // Re-fetch when the provider or the (freshly-typed) key changed since
+  // the last fetch — avoids a stale list left over from a different
+  // provider/key. Checked lazily on open rather than via an effect (a
+  // provider/key change while the popover is closed shouldn't trigger a
+  // network call nobody's about to look at).
+  const openPicker = () => {
+    setOpen(true);
+    const key = apiKeyForFetch ? `${provider}:${apiKeyForFetch}` : null;
+    if (key && fetchedForRef.current !== key) {
+      setModels([]);
+      setFetchState('idle');
+      void fetchModels();
+    }
+  };
+
+  const filtered = search.trim()
+    ? models.filter(
+        (m) =>
+          m.id.toLowerCase().includes(search.toLowerCase()) ||
+          (m.label ?? '').toLowerCase().includes(search.toLowerCase()),
+      )
+    : models;
+
+  if (manualMode) {
+    return (
+      <div className="space-y-1.5">
+        <div className="flex gap-2">
+          <Input
+            value={model}
+            onChange={(e) => onModelChange(e.target.value)}
+            placeholder={AI_PROVIDER_DEFAULT_MODEL[provider]}
+            disabled={disabled}
+          />
+          {!!apiKeyForFetch && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => setManualMode(false)}
+              disabled={disabled}
+              title={t('modelPickerBrowse')}
+            >
+              <Search className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">{t('modelManualHint')}</p>
+      </div>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={(o) => (o ? openPicker() : setOpen(false))}>
+      <PopoverTrigger
+        disabled={disabled}
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-between font-normal"
+          />
+        }
+      >
+        <span className="truncate">{model || t('modelPickerPlaceholder')}</span>
+        <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-0" align="start">
+        <div className="flex items-center gap-2 border-b border-border p-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('modelSearchPlaceholder')}
+            className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto p-1">
+          {fetchState === 'loading' && (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> {t('modelsLoading')}
+            </div>
+          )}
+          {fetchState !== 'loading' && !apiKeyForFetch && (
+            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+              {t('modelsNeedKeyHint')}
+            </p>
+          )}
+          {fetchState === 'loaded' && filtered.length === 0 && (
+            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+              {t('modelsNoMatch')}
+            </p>
+          )}
+          {fetchState === 'loaded' &&
+            filtered.slice(0, 300).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  onModelChange(m.id);
+                  setOpen(false);
+                }}
+                className={`flex w-full flex-col rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${
+                  m.id === model ? 'bg-muted' : ''
+                }`}
+              >
+                <span className="truncate">{m.id}</span>
+                {m.label && m.label !== m.id && (
+                  <span className="truncate text-xs text-muted-foreground">{m.label}</span>
+                )}
+              </button>
+            ))}
+        </div>
+        <div className="border-t border-border p-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setManualMode(true);
+              setOpen(false);
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Pencil className="h-3.5 w-3.5" /> {t('modelEnterManually')}
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function AiConfig() {
   const { accountId, accountRole, profileLoading } = useAuth();
@@ -73,6 +279,8 @@ export function AiConfig() {
   const [qualificationSystemPrompt, setQualificationSystemPrompt] = useState('');
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [aiSelfDiscloses, setAiSelfDiscloses] = useState(true);
+  const [optOutAppliesToWhatsapp, setOptOutAppliesToWhatsapp] = useState(true);
   const [maxPerConversation, setMaxPerConversation] = useState(3);
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
@@ -102,6 +310,8 @@ export function AiConfig() {
         setQualificationSystemPrompt(data.qualification_system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
+        setAiSelfDiscloses(data.ai_self_discloses !== false);
+        setOptOutAppliesToWhatsapp(data.opt_out_applies_to_whatsapp !== false);
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
         setHasStoredKey(Boolean(data.has_key));
@@ -135,6 +345,7 @@ export function AiConfig() {
     const isDefaultModel =
       model === AI_PROVIDER_DEFAULT_MODEL.openai ||
       model === AI_PROVIDER_DEFAULT_MODEL.anthropic ||
+      model === AI_PROVIDER_DEFAULT_MODEL.openrouter ||
       model.trim() === '';
     if (isDefaultModel) setModel(AI_PROVIDER_DEFAULT_MODEL[next]);
   };
@@ -155,6 +366,8 @@ export function AiConfig() {
     qualification_system_prompt: qualificationSystemPrompt.trim() || null,
     is_active: isActive,
     auto_reply_enabled: autoReplyEnabled,
+    ai_self_discloses: aiSelfDiscloses,
+    opt_out_applies_to_whatsapp: optOutAppliesToWhatsapp,
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
   });
@@ -223,6 +436,8 @@ export function AiConfig() {
         setKeyEdited(false);
         setIsActive(false);
         setAutoReplyEnabled(false);
+        setAiSelfDiscloses(true);
+        setOptOutAppliesToWhatsapp(true);
         setSystemPrompt('');
         setOutreachSystemPrompt('');
         setQualificationSystemPrompt('');
@@ -289,17 +504,20 @@ export function AiConfig() {
                     <SelectItem value="anthropic">
                       {PROVIDER_LABEL.anthropic}
                     </SelectItem>
+                    <SelectItem value="openrouter">
+                      {PROVIDER_LABEL.openrouter}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="ai-model">{t('model')}</Label>
-                <Input
-                  id="ai-model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder={AI_PROVIDER_DEFAULT_MODEL[provider]}
+                <ModelPicker
+                  provider={provider}
+                  model={model}
+                  onModelChange={setModel}
+                  apiKeyForFetch={keyEdited ? apiKey.trim() || undefined : undefined}
                   disabled={disabled}
                 />
               </div>
@@ -399,6 +617,7 @@ export function AiConfig() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="ai-prompt">{t('businessContext')}</Label>
+              <p className="text-xs text-muted-foreground">{t('businessContextKbHint')}</p>
               <Textarea
                 id="ai-prompt"
                 value={systemPrompt}
@@ -470,6 +689,38 @@ export function AiConfig() {
                 checked={autoReplyEnabled}
                 onCheckedChange={setAutoReplyEnabled}
                 disabled={disabled || !isActive}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t('aiSelfDiscloses')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('aiSelfDisclosesDesc')}
+                </p>
+              </div>
+              <Switch
+                checked={aiSelfDiscloses}
+                onCheckedChange={setAiSelfDiscloses}
+                disabled={disabled}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t('optOutAppliesToWhatsapp')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('optOutAppliesToWhatsappDesc')}
+                </p>
+              </div>
+              <Switch
+                checked={optOutAppliesToWhatsapp}
+                onCheckedChange={setOptOutAppliesToWhatsapp}
+                disabled={disabled}
               />
             </div>
 

@@ -1774,7 +1774,21 @@
       "saveSuccess": "AI assistant saved.",
       "saveFailed": "Failed to save.",
       "removeSuccess": "AI configuration removed.",
-      "removeFailed": "Failed to remove."
+      "removeFailed": "Failed to remove.",
+      "modelPickerPlaceholder": "Select a model...",
+      "modelSearchPlaceholder": "Search models...",
+      "modelsLoading": "Loading models...",
+      "modelsNeedKeyHint": "Enter (or re-enter) your API key above to load the live model list.",
+      "modelsNoMatch": "No models match your search.",
+      "modelsFetchFailed": "Could not load the model list — enter the model id manually.",
+      "modelEnterManually": "Enter a model id manually",
+      "modelPickerBrowse": "Browse models",
+      "modelManualHint": "Typing the model id manually. Click the search icon to browse the live list instead (requires a freshly entered API key).",
+      "aiSelfDiscloses": "AI discloses it's an AI",
+      "aiSelfDisclosesDesc": "When on, the assistant identifies itself as an AI if asked. When off, it stays neutral about its identity.",
+      "optOutAppliesToWhatsapp": "Opt-out phrases also apply to WhatsApp",
+      "optOutAppliesToWhatsappDesc": "When on, phrases like \"do not contact me\" or \"not interested\" stop outreach on WhatsApp too, not just SMS.",
+      "businessContextKbHint": "For carrier/product details and FAQs, use the Knowledge Base below instead of pasting them here — it's retrieved automatically for relevant questions."
     },
     "aiKnowledge": {
       "loadFailed": "Failed to load knowledge base",

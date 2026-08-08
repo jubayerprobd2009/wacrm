@@ -6,7 +6,7 @@
 // whether the account is on OpenAI or Anthropic.
 // ============================================================
 
-export type AiProvider = 'openai' | 'anthropic'
+export type AiProvider = 'openai' | 'anthropic' | 'openrouter'
 
 /**
  * Account AI setup, decrypted and ready to use. Produced by
@@ -36,6 +36,19 @@ export interface AiConfig {
    *  knowledge base is embedded and semantic retrieval turns on; when
    *  null, retrieval falls back to lexical full-text search. */
   embeddingsApiKey: string | null
+  /** Whether the assistant discloses it's an AI when it identifies
+   *  itself / when asked. Configurable rather than hardcoded — the
+   *  client's own business material gave conflicting instructions on
+   *  this across different touchpoints, so it's a per-account setting
+   *  with a safe default (true) instead of a guess baked into the
+   *  prompt scaffold. */
+  aiSelfDiscloses: boolean
+  /** Whether the opt-out phrase-list check (see sms webhook) also
+   *  applies to inbound WhatsApp messages, not just SMS. Default true
+   *  (WhatsApp Business API's own policies expect opt-outs honored
+   *  too) — same "ship a toggle with a safe default" pattern as
+   *  `aiSelfDiscloses`. */
+  optOutAppliesToWhatsapp: boolean
 }
 
 /** A single conversation turn in the shape both providers accept. */

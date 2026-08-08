@@ -31,6 +31,7 @@ import type { AiConfig, ChatMessage } from './types'
 import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
 import { latestUserMessage } from './query'
+import { retrieveKnowledge } from './knowledge'
 import { runOutreachTurn } from './outreach-assistant'
 import {
   runQualificationTurn,
@@ -116,11 +117,13 @@ export async function dispatchInboundToLeadOutreach(
     if (contact.do_not_contact || state.stage === 'opted_out') {
       // Opted out: still answer questions conversationally, but the
       // outreach assistant is told to never pitch/ask-to-book again.
+      const knowledge = await retrieveKnowledge(db, accountId, config, latestUserMessage(messages))
       const { text, usage } = await runOutreachTurn({
         config,
         companyName,
         messages,
         suppressPitch: true,
+        knowledge,
       })
       await logAiUsage(db, {
         accountId,
@@ -271,11 +274,13 @@ async function runQualificationStep(
   state: LeadOutreachStateRow,
   messages: ChatMessage[],
 ): Promise<void> {
+  const knowledge = await retrieveKnowledge(db, accountId, config, latestUserMessage(messages))
   const { text, data, ready, usage } = await runQualificationTurn({
     config,
     companyName,
     knownData: state.qualification_data ?? EMPTY_QUALIFICATION_DATA,
     messages,
+    knowledge,
   })
   await logAiUsage(db, {
     accountId,
@@ -349,7 +354,17 @@ export async function sendInitialOutreach(
 
     const companyName = await loadCompanyName(db, accountId)
 
-    const { text, usage } = await runOutreachTurn({ config, companyName, messages: [] })
+    // No customer message exists yet for the very first touch — ground
+    // the introduction itself against the KB with a generic query
+    // describing what this turn needs (services + benefits overview),
+    // rather than skipping retrieval entirely (see plan section B4).
+    const knowledge = await retrieveKnowledge(
+      db,
+      accountId,
+      config,
+      'introduce the company and the insurance services and benefits offered',
+    )
+    const { text, usage } = await runOutreachTurn({ config, companyName, messages: [], knowledge })
     await logAiUsage(db, {
       accountId,
       conversationId,

@@ -102,6 +102,7 @@ export async function POST(request: Request) {
       userPrompt: config.systemPrompt,
       mode: 'draft',
       knowledge,
+      aiSelfDiscloses: config.aiSelfDiscloses,
     })
 
     const { text, usage } = await generateReply({ config, systemPrompt, messages })

@@ -3,7 +3,7 @@ import { decrypt } from '@/lib/crypto/encryption'
 import type { AiConfig } from './types'
 
 interface AiConfigRow {
-  provider: 'openai' | 'anthropic'
+  provider: 'openai' | 'anthropic' | 'openrouter'
   model: string
   api_key: string
   system_prompt: string | null
@@ -14,10 +14,12 @@ interface AiConfigRow {
   auto_reply_max_per_conversation: number
   handoff_agent_id: string | null
   embeddings_api_key: string | null
+  ai_self_discloses: boolean
+  opt_out_applies_to_whatsapp: boolean
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, outreach_system_prompt, qualification_system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key'
+  'provider, model, api_key, system_prompt, outreach_system_prompt, qualification_system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key, ai_self_discloses, opt_out_applies_to_whatsapp'
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -83,6 +85,8 @@ export async function loadAiConfig(
     autoReplyMaxPerConversation: row.auto_reply_max_per_conversation,
     handoffAgentId: row.handoff_agent_id,
     embeddingsApiKey,
+    aiSelfDiscloses: row.ai_self_discloses,
+    optOutAppliesToWhatsapp: row.opt_out_applies_to_whatsapp,
   }
 }
 

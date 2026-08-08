@@ -16,6 +16,7 @@ const { supabaseAdmin } = vi.hoisted(() => {
     insert: vi.fn(() => builder),
     update: vi.fn(() => builder),
     eq: vi.fn(() => builder),
+    maybeSingle: vi.fn(() => Promise.resolve({ data: null, error: null })),
     then: (resolve: (v: { data: null; error: null; count: number }) => void) =>
       resolve({ data: null, error: null, count: 0 }),
   }

@@ -6,6 +6,7 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 import { reopenClosedConversation } from '@/lib/conversations/reopen';
 import { verifyTwilioWebhookSignature } from '@/lib/sms/webhook-signature';
 import { updateLeadStatus } from '@/lib/contacts/lead-status';
+import { isOptOutMessage } from '@/lib/compliance/opt-out';
 
 // ============================================================
 // POST /api/sms/webhook — inbound Twilio SMS delivery.
@@ -44,8 +45,6 @@ function supabaseAdmin() {
   }
   return _adminClient;
 }
-
-const STOP_KEYWORDS = /^\s*(stop|stopall|unsubscribe|cancel|end|quit)\s*$/i;
 
 export async function POST(request: Request) {
   const url = new URL(request.url);
@@ -133,7 +132,7 @@ export async function POST(request: Request) {
   }
 
   // ---- STOP / opt-out — before anything else persists ------------
-  if (STOP_KEYWORDS.test(body)) {
+  if (isOptOutMessage(body)) {
     const { error: optOutErr } = await admin
       .from('contacts')
       .update({
