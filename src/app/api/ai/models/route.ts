@@ -1,17 +1,23 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
+import { decrypt } from '@/lib/crypto/encryption'
 import type { AiProvider } from '@/lib/ai/types'
 
 /**
  * POST /api/ai/models  (admin+)
  *
  * Live model list for the settings form's searchable picker (see
- * ai-config.tsx). POST rather than GET because the not-yet-saved API
- * key has to travel in the body — mirrors the existing "Test key"
- * route (`/api/ai/test`), which does the same for the same reason.
+ * ai-config.tsx). POST rather than GET because a not-yet-saved API key
+ * has to travel in the body sometimes.
  *
- * Body: `{ provider: 'openai' | 'anthropic' | 'openrouter', api_key: string }`.
+ * Body: `{ provider: 'openai' | 'anthropic' | 'openrouter', api_key?: string }`.
+ * `api_key` is optional — when omitted (the form hasn't been re-typed
+ * this session), falls back to the account's already-saved, decrypted
+ * key, exactly like `/api/ai/test` already does. Without this fallback
+ * the picker only worked immediately after typing a fresh key and broke
+ * right after a successful Save (the field re-masks), forcing a
+ * re-paste every time — this fixes that.
  * Response: `{ models: { id: string, label?: string }[] }` on success,
  * or `{ error }` on failure — the frontend falls back to manual model
  * entry on any error rather than blocking the form.
@@ -81,7 +87,7 @@ async function listOpenRouterModels(apiKey: string): Promise<ModelOption[]> {
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await requireRole('admin')
+    const { supabase, accountId, userId } = await requireRole('admin')
 
     const limit = checkRateLimit(`ai-models:${userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
@@ -92,14 +98,35 @@ export async function POST(request: Request) {
     }
 
     const provider = body.provider as AiProvider
-    const apiKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
-
     if (provider !== 'openai' && provider !== 'anthropic' && provider !== 'openrouter') {
       return NextResponse.json(
         { error: 'provider must be "openai", "anthropic", or "openrouter"' },
         { status: 400 },
       )
     }
+
+    let apiKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
+    if (!apiKey) {
+      const { data: existing } = await supabase
+        .from('ai_configs')
+        .select('provider, api_key')
+        .eq('account_id', accountId)
+        .maybeSingle()
+      // Only reuse the stored key when it's for the SAME provider the
+      // picker is currently showing — an OpenAI key can't list
+      // Anthropic's models, so silently trying would just 401.
+      if (existing?.api_key && existing.provider === provider) {
+        try {
+          apiKey = decrypt(existing.api_key)
+        } catch {
+          return NextResponse.json(
+            { error: 'Stored API key could not be decrypted — re-enter your key.' },
+            { status: 400 },
+          )
+        }
+      }
+    }
+
     // OpenRouter's list is public, so an empty key is tolerated there;
     // OpenAI/Anthropic require one to list anything.
     if (!apiKey && provider !== 'openrouter') {

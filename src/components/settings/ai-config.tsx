@@ -78,16 +78,20 @@ function ModelPicker({
   provider,
   model,
   onModelChange,
-  apiKeyForFetch,
+  apiKeyOverride,
+  hasStoredKey,
   disabled,
 }: {
   provider: AiProvider;
   model: string;
   onModelChange: (id: string) => void;
-  /** The plaintext key to fetch models with — undefined when the
-   *  stored key hasn't been re-entered this session (fetch is disabled
-   *  in that case; typing the model id manually still works). */
-  apiKeyForFetch: string | undefined;
+  /** The freshly-typed plaintext key this session, or undefined when
+   *  the field still shows the masked placeholder (not edited). */
+  apiKeyOverride: string | undefined;
+  /** Whether this provider already has a saved key on the account —
+   *  when true, the backend falls back to it server-side (decrypted),
+   *  so the picker keeps working after Save without forcing a re-paste. */
+  hasStoredKey: boolean;
   disabled: boolean;
 }) {
   const t = useTranslations('Settings.aiConfig');
@@ -98,14 +102,20 @@ function ModelPicker({
   const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const fetchedForRef = useRef<string | null>(null);
 
+  // OpenRouter's list is public — always fetchable even with no key at
+  // all. OpenAI/Anthropic need either a freshly-typed key or a
+  // previously-saved one (resolved server-side).
+  const canFetch = !!apiKeyOverride || hasStoredKey || provider === 'openrouter';
+  const fetchCacheKey = `${provider}:${apiKeyOverride ?? (hasStoredKey ? 'stored' : 'none')}`;
+
   const fetchModels = useCallback(async () => {
-    if (!apiKeyForFetch) return;
+    if (!canFetch) return;
     setFetchState('loading');
     try {
       const res = await fetch('/api/ai/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, api_key: apiKeyForFetch }),
+        body: JSON.stringify({ provider, api_key: apiKeyOverride || undefined }),
       });
       const data = await res.json();
       if (!res.ok || !Array.isArray(data.models)) {
@@ -116,23 +126,22 @@ function ModelPicker({
       }
       setModels(data.models);
       setFetchState('loaded');
-      fetchedForRef.current = `${provider}:${apiKeyForFetch}`;
+      fetchedForRef.current = fetchCacheKey;
     } catch {
       setFetchState('error');
       setManualMode(true);
       toast.error(t('modelsFetchFailed'));
     }
-  }, [provider, apiKeyForFetch, t]);
+  }, [provider, apiKeyOverride, canFetch, fetchCacheKey, t]);
 
-  // Re-fetch when the provider or the (freshly-typed) key changed since
-  // the last fetch — avoids a stale list left over from a different
+  // Re-fetch when the provider or the key situation changed since the
+  // last fetch — avoids a stale list left over from a different
   // provider/key. Checked lazily on open rather than via an effect (a
   // provider/key change while the popover is closed shouldn't trigger a
   // network call nobody's about to look at).
   const openPicker = () => {
     setOpen(true);
-    const key = apiKeyForFetch ? `${provider}:${apiKeyForFetch}` : null;
-    if (key && fetchedForRef.current !== key) {
+    if (canFetch && fetchedForRef.current !== fetchCacheKey) {
       setModels([]);
       setFetchState('idle');
       void fetchModels();
@@ -157,7 +166,7 @@ function ModelPicker({
             placeholder={AI_PROVIDER_DEFAULT_MODEL[provider]}
             disabled={disabled}
           />
-          {!!apiKeyForFetch && (
+          {canFetch && (
             <Button
               type="button"
               variant="outline"
@@ -207,7 +216,7 @@ function ModelPicker({
               <Loader2 className="h-4 w-4 animate-spin" /> {t('modelsLoading')}
             </div>
           )}
-          {fetchState !== 'loading' && !apiKeyForFetch && (
+          {fetchState !== 'loading' && !canFetch && (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">
               {t('modelsNeedKeyHint')}
             </p>
@@ -517,7 +526,8 @@ export function AiConfig() {
                   provider={provider}
                   model={model}
                   onModelChange={setModel}
-                  apiKeyForFetch={keyEdited ? apiKey.trim() || undefined : undefined}
+                  apiKeyOverride={keyEdited ? apiKey.trim() || undefined : undefined}
+                  hasStoredKey={hasStoredKey}
                   disabled={disabled}
                 />
               </div>
