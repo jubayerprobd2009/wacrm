@@ -185,7 +185,33 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { phone_number_id, waba_id, verify_token, pin } = body
+    let access_token = body.access_token as string | undefined
+
+    // Look up any pre-existing row for this account early — needed both
+    // to fall back to the already-saved (encrypted) access_token below
+    // when the form didn't re-send one, and later to decide whether
+    // /register can be skipped. Without the fallback, EVERY save that
+    // isn't a fresh initial connect (e.g. just updating the WABA ID,
+    // verify token, or PIN) failed outright, even with a valid working
+    // token already on file — mirrors the /api/ai/test vs. (pre-fix)
+    // /api/ai/models gap.
+    const { data: existing } = await supabase
+      .from('whatsapp_config')
+      .select('id, access_token, registered_at, phone_number_id')
+      .eq('account_id', accountId)
+      .maybeSingle()
+
+    if (!access_token && existing?.access_token) {
+      try {
+        access_token = decrypt(existing.access_token)
+      } catch {
+        return NextResponse.json(
+          { error: 'Stored access token could not be decrypted — re-enter it to save.' },
+          { status: 400 }
+        )
+      }
+    }
 
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
@@ -269,15 +295,10 @@ export async function POST(request: Request) {
       )
     }
 
-    // Look up any pre-existing row for this account so we know whether
-    // this number is already registered with Meta — if so we can skip
-    // /register when the user didn't provide a PIN this time around.
-    const { data: existing } = await supabase
-      .from('whatsapp_config')
-      .select('id, registered_at, phone_number_id')
-      .eq('account_id', accountId)
-      .maybeSingle()
-
+    // `existing` was already fetched above (for the access_token
+    // fallback) — reused here to decide whether this number is already
+    // registered with Meta, so /register can be skipped when the user
+    // didn't provide a fresh PIN this time around.
     const sameNumber =
       existing?.phone_number_id === phone_number_id &&
       existing?.registered_at != null

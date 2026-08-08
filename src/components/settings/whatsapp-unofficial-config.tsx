@@ -378,7 +378,12 @@ function WaSenderPanel({
   const disabled = !canEdit || (!isThisProvider && !acknowledged);
 
   async function handleConnect() {
-    if (!apiKey.trim()) {
+    // A key is only REQUIRED for a fresh connect. Reconnecting an
+    // already-configured account can omit it — the backend falls back
+    // to the stored, decrypted key (POST /api/whatsapp/unofficial/config
+    // already supports this); blocking the request client-side just
+    // because the field wasn't retyped was the bug, not the backend.
+    if (!isThisProvider && !apiKey.trim()) {
       toast.error(t('wasenderApiKeyRequired'));
       return;
     }
@@ -387,7 +392,10 @@ function WaSenderPanel({
       const res = await fetch('/api/whatsapp/unofficial/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'wasender', api_key: apiKey.trim() }),
+        body: JSON.stringify({
+          provider: 'wasender',
+          api_key: apiKey.trim() || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
