@@ -14,7 +14,10 @@ import { exchangeCodeForTokens, verifyState, encryptTokens, GoogleOAuthError } f
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const baseUrl = getBaseUrl(request, '[GET /api/google/oauth/callback]')
-  const settingsUrl = (params: string) => NextResponse.redirect(`${baseUrl}/settings/google?${params}`)
+  // Settings is a single page keyed by ?tab= (see settings-sections.ts),
+  // not a nested route — there is no /settings/google page, so that
+  // redirect 404'd on every successful (and failed) connect attempt.
+  const settingsUrl = (params: string) => NextResponse.redirect(`${baseUrl}/settings?tab=google&${params}`)
 
   const oauthError = url.searchParams.get('error')
   if (oauthError) {
