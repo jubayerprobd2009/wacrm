@@ -8,9 +8,33 @@ import { deriveEvolutionWebhookSecret } from '@/lib/whatsapp/providers/webhook-a
 import {
   createInstance,
   setWebhook,
+  logoutInstance,
   deleteInstance,
   type EvolutionConnectionConfig,
 } from '@/lib/whatsapp/providers/evolution/client'
+
+/**
+ * Evolution rejects `/instance/delete` with a 400 for an instance
+ * that's still connected/connecting — it must be logged out first
+ * (confirmed live: deleting a fresh, not-yet-scanned instance fails
+ * until preceded by a logout call). Logout itself is a no-op-ish
+ * "close the session" call that succeeds even for an instance that
+ * was never fully connected, so it's safe to call unconditionally
+ * before every delete. Both steps are best-effort — the caller already
+ * treats cleanup failures as non-fatal.
+ */
+async function logoutThenDelete(
+  clientConfig: EvolutionConnectionConfig,
+  instanceName: string
+): Promise<void> {
+  try {
+    await logoutInstance(clientConfig, instanceName)
+  } catch {
+    // Expected when the instance was never connected — ignore and
+    // still attempt the delete below.
+  }
+  await deleteInstance(clientConfig, instanceName)
+}
 
 /**
  * POST /api/whatsapp/unofficial/evolution/connect  (admin+)
@@ -117,7 +141,7 @@ export async function POST(request: Request) {
     // shouldn't block starting a fresh one.
     if (upserted.instance_name) {
       try {
-        await deleteInstance(clientConfig, upserted.instance_name)
+        await logoutThenDelete(clientConfig, upserted.instance_name)
       } catch (err) {
         console.warn('[evolution/connect] cleanup of previous instance failed (continuing):', err)
       }
@@ -150,7 +174,7 @@ export async function POST(request: Request) {
       // Instance exists on Evolution's side but we couldn't record it —
       // delete it now rather than leak it silently.
       try {
-        await deleteInstance(clientConfig, instanceName)
+        await logoutThenDelete(clientConfig, instanceName)
       } catch (cleanupErr) {
         console.warn('[evolution/connect] cleanup after persist failure also failed:', cleanupErr)
       }
@@ -168,7 +192,7 @@ export async function POST(request: Request) {
     } catch (err) {
       console.error('[evolution/connect] setWebhook failed, rolling back instance:', err)
       try {
-        await deleteInstance(clientConfig, instanceName)
+        await logoutThenDelete(clientConfig, instanceName)
       } catch (cleanupErr) {
         console.warn('[evolution/connect] rollback delete also failed (will retry on next connect):', cleanupErr)
       }

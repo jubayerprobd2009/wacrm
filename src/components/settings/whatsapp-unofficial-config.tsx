@@ -86,6 +86,10 @@ interface UnofficialConfigResponse {
 const ACK_STORAGE_PREFIX = 'wacrm.unofficial-ban-ack.';
 const EVOLUTION_POLL_INTERVAL_MS = 3000;
 const EVOLUTION_POLL_MAX_ATTEMPTS = 40; // ~2 minutes
+// Well under Baileys/Evolution's own QR expiry window — keeps the
+// displayed code always scannable for as long as the user is looking
+// at it, instead of going stale mid-wait with no visible indication.
+const EVOLUTION_QR_REFRESH_INTERVAL_MS = 20000;
 
 function getAppOrigin(): string {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '');
@@ -636,19 +640,47 @@ function EvolutionPanel({
   const [connectedPhone, setConnectedPhone] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollAttemptsRef = useRef(0);
+  const qrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
+    if (qrRefreshRef.current) {
+      clearInterval(qrRefreshRef.current);
+      qrRefreshRef.current = null;
+    }
   }, []);
 
   useEffect(() => stopPolling, [stopPolling]);
 
+  // Evolution/Baileys QR codes are short-lived (well under the ~2min
+  // total poll window) — without periodically fetching a fresh one, a
+  // user who takes more than a few dozen seconds to open WhatsApp and
+  // scan sees a QR that silently went stale, and scanning it never
+  // completes with no visible error. Runs independently of the status
+  // poll below (different interval) so a slow status-poll response
+  // doesn't delay the QR refresh or vice versa.
+  const startQrRefresh = useCallback(() => {
+    if (qrRefreshRef.current) clearInterval(qrRefreshRef.current);
+    qrRefreshRef.current = setInterval(async () => {
+      try {
+        const res = await fetch('/api/whatsapp/unofficial/evolution/qr');
+        const data = await res.json();
+        if (res.ok && data.qrcode) setQrCode(data.qrcode);
+      } catch {
+        // transient — the next interval tick (or the still-displayed
+        // QR) covers it; not worth surfacing a toast for a background
+        // refresh.
+      }
+    }, EVOLUTION_QR_REFRESH_INTERVAL_MS);
+  }, []);
+
   const startPolling = useCallback(() => {
     stopPolling();
     pollAttemptsRef.current = 0;
+    startQrRefresh();
     pollRef.current = setInterval(async () => {
       pollAttemptsRef.current += 1;
       try {
@@ -670,7 +702,7 @@ function EvolutionPanel({
         setModalOpen(false);
       }
     }, EVOLUTION_POLL_INTERVAL_MS);
-  }, [onSaved, stopPolling, t]);
+  }, [onSaved, stopPolling, startQrRefresh, t]);
 
   function openConnectModal() {
     setDisplayName(savedDisplayName);
