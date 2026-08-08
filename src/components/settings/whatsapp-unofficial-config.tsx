@@ -114,30 +114,45 @@ export function WhatsAppUnofficialConfig() {
 
   const loadedAccountIdRef = useRef<string | null>(null);
 
-  const fetchConfig = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/whatsapp/unofficial/config');
-      const data = (await res.json()) as UnofficialConfigResponse;
-      if (!res.ok) {
+  // `isInitial` gates the full-page spinner below, which its early
+  // `return` unmounts this entire section for (including whatever's
+  // rendered inside WaSenderPanel/EvolutionPanel — e.g. an open
+  // "scan this QR" Dialog). Only the very first load should do that.
+  // Every OTHER call (the window-focus listener below, and every
+  // connect/disconnect/save action via `refreshAll`) must update
+  // `config` without unmounting the tree, or a background refresh
+  // fired while the Evolution QR modal is open silently destroys it
+  // mid-scan — confirmed live: the modal would open, then vanish a few
+  // seconds later with no error, because a focus event refetched and
+  // the loading-spinner return replaced the whole section, Dialog and
+  // all, out from under the user.
+  const fetchConfig = useCallback(
+    async (isInitial = false) => {
+      if (isInitial) setLoading(true);
+      try {
+        const res = await fetch('/api/whatsapp/unofficial/config');
+        const data = (await res.json()) as UnofficialConfigResponse;
+        if (!res.ok) {
+          toast.error(t('loadFailed'));
+          return;
+        }
+        setConfig(data);
+        if (data.configured && data.provider) {
+          setProvider(data.provider);
+        }
+      } catch {
         toast.error(t('loadFailed'));
-        return;
+      } finally {
+        if (isInitial) setLoading(false);
       }
-      setConfig(data);
-      if (data.configured && data.provider) {
-        setProvider(data.provider);
-      }
-    } catch {
-      toast.error(t('loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+    },
+    [t]
+  );
 
   useEffect(() => {
     if (!accountId || loadedAccountIdRef.current === accountId) return;
     loadedAccountIdRef.current = accountId;
-    void fetchConfig();
+    void fetchConfig(true);
     try {
       const stored = window.localStorage.getItem(ACK_STORAGE_PREFIX + accountId);
       if (stored === '1') setAcknowledged(true);
