@@ -213,4 +213,30 @@ describe('dispatchInboundToAiReply — handoff', () => {
       assigned_agent_id: 'agent-7',
     })
   })
+
+  it('hands off to a human when the provider call throws, instead of silently dropping the message', async () => {
+    // Regression test: confirmed live against OpenRouter — a thrown
+    // AiError ("OpenRouter returned an empty response") used to fall
+    // straight to the outer catch, which only logs. The customer's
+    // message got no reply AND no human was notified. It must now
+    // route through the same hand-off path as an explicit handoff.
+    h.generateReply.mockRejectedValue(new Error('OpenRouter returned an empty response.'))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+    expect(h.state.rpcCalls).toHaveLength(0)
+    expect(h.state.updatePayload).toMatchObject({ ai_autoreply_disabled: true })
+    expect(h.state.updatePayload?.ai_handoff_summary).toContain(
+      'OpenRouter returned an empty response.',
+    )
+  })
+
+  it('routes provider-error handoffs to the configured handoff agent too', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ handoffAgentId: 'agent-7' }))
+    h.generateReply.mockRejectedValue(new Error('network error'))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.state.updatePayload).toMatchObject({
+      ai_autoreply_disabled: true,
+      assigned_agent_id: 'agent-7',
+    })
+  })
 })

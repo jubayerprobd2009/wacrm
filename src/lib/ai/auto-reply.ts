@@ -113,11 +113,44 @@ export async function dispatchInboundToAiReply(
       aiSelfDiscloses: config.aiSelfDiscloses,
     })
 
-    const { text, handoff, usage } = await generateReply({
-      config,
-      systemPrompt,
-      messages,
-    })
+    // Shared hand-off routine — pause the bot on this thread, route to
+    // the configured handoff agent (null = shared queue), leave an
+    // internal note. Used both when the model explicitly declines
+    // (handoff sentinel / empty text) AND when the provider call itself
+    // throws (rate limit, empty response, timeout, network error).
+    // Previously a thrown error fell straight to the outer catch below,
+    // which only logs — the customer's message silently got NO reply
+    // and NO human was notified either. Confirmed live: an OpenRouter
+    // "empty response" error left a real customer question unanswered
+    // with nothing in the inbox flagging it.
+    const handOffToHuman = async (summaryOverride?: string) => {
+      const summary =
+        summaryOverride ??
+        buildHandoffSummary({ messages, replyCount: conv.ai_reply_count ?? 0 })
+      const update: Record<string, unknown> = {
+        ai_autoreply_disabled: true,
+        ai_handoff_summary: summary,
+      }
+      // Only set the assignee when a target is configured AND the thread
+      // isn't already owned — never stomp an existing human assignment.
+      if (config.handoffAgentId && !conv.assigned_agent_id) {
+        update.assigned_agent_id = config.handoffAgentId
+      }
+      await db.from('conversations').update(update).eq('id', conversationId)
+    }
+
+    let text: string
+    let handoff: boolean
+    let usage: Awaited<ReturnType<typeof generateReply>>['usage']
+    try {
+      ;({ text, handoff, usage } = await generateReply({ config, systemPrompt, messages }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[ai auto-reply] provider call failed, handing off to human:', message)
+      const base = buildHandoffSummary({ messages, replyCount: conv.ai_reply_count ?? 0 })
+      await handOffToHuman(`${base}\n\n(AI provider error: ${message})`)
+      return
+    }
 
     // Record token spend on the account's BYO key. Fire-and-forget so it
     // never adds latency to the customer-facing send: `logAiUsage`
@@ -135,26 +168,8 @@ export async function dispatchInboundToAiReply(
 
     if (handoff || !text) {
       // The model can't (or shouldn't) answer — stop auto-replying on
-      // this thread and hand it to a human. We (a) pause the bot here
-      // (sticky until re-enabled), (b) route the conversation to the
-      // configured handoff agent — null leaves it in the shared queue —
-      // and (c) leave a short internal note so whoever picks it up has
-      // context. Assigning fires the `on_conversation_assigned` trigger,
-      // which notifies the agent.
-      const summary = buildHandoffSummary({
-        messages,
-        replyCount: conv.ai_reply_count ?? 0,
-      })
-      const update: Record<string, unknown> = {
-        ai_autoreply_disabled: true,
-        ai_handoff_summary: summary,
-      }
-      // Only set the assignee when a target is configured AND the thread
-      // isn't already owned — never stomp an existing human assignment.
-      if (config.handoffAgentId && !conv.assigned_agent_id) {
-        update.assigned_agent_id = config.handoffAgentId
-      }
-      await db.from('conversations').update(update).eq('id', conversationId)
+      // this thread and hand it to a human.
+      await handOffToHuman()
       return
     }
 

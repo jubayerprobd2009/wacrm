@@ -118,23 +118,31 @@ export async function dispatchInboundToLeadOutreach(
       // Opted out: still answer questions conversationally, but the
       // outreach assistant is told to never pitch/ask-to-book again.
       const knowledge = await retrieveKnowledge(db, accountId, config, latestUserMessage(messages))
-      const { text, usage } = await runOutreachTurn({
-        config,
-        companyName,
-        messages,
-        suppressPitch: true,
-        knowledge,
-      })
-      await logAiUsage(db, {
-        accountId,
-        conversationId,
-        mode: 'lead_outreach',
-        provider: config.provider,
-        model: config.model,
-        usage,
-      })
-      if (text) {
-        await sendSmsToConversation(db, accountId, { conversationId, body: text, isAutomated: false })
+      try {
+        const { text, usage } = await runOutreachTurn({
+          config,
+          companyName,
+          messages,
+          suppressPitch: true,
+          knowledge,
+        })
+        await logAiUsage(db, {
+          accountId,
+          conversationId,
+          mode: 'lead_outreach',
+          provider: config.provider,
+          model: config.model,
+          usage,
+        })
+        if (text) {
+          await sendSmsToConversation(db, accountId, { conversationId, body: text, isAutomated: false })
+        }
+      } catch (err) {
+        // Opted-out is already a terminal, at-rest state — a provider
+        // failure here just means this one question goes unanswered
+        // (no state transition needed, unlike the qualifying case
+        // below). Logged so it's not invisible.
+        console.error('[lead-outreach-dispatch] opted-out reply generation failed:', err)
       }
       return
     }
@@ -275,13 +283,30 @@ async function runQualificationStep(
   messages: ChatMessage[],
 ): Promise<void> {
   const knowledge = await retrieveKnowledge(db, accountId, config, latestUserMessage(messages))
-  const { text, data, ready, usage } = await runQualificationTurn({
-    config,
-    companyName,
-    knownData: state.qualification_data ?? EMPTY_QUALIFICATION_DATA,
-    messages,
-    knowledge,
-  })
+
+  let text: string, data: QualificationData, ready: boolean, usage: Awaited<ReturnType<typeof runQualificationTurn>>['usage']
+  try {
+    ;({ text, data, ready, usage } = await runQualificationTurn({
+      config,
+      companyName,
+      knownData: state.qualification_data ?? EMPTY_QUALIFICATION_DATA,
+      messages,
+      knowledge,
+    }))
+  } catch (err) {
+    // Same failure mode confirmed live on the WhatsApp side (see
+    // auto-reply.ts): a provider error (rate limit, empty response,
+    // timeout) must not leave the lead silently stuck mid-qualification
+    // forever with nothing indicating it needs a human. `lead_outreach_
+    // state` has no dedicated error-message column (unlike
+    // `conversations.ai_handoff_summary`), so this stops short of a
+    // rich note — but at minimum the lead is taken off autopilot so a
+    // human reviewing stalled leads will actually see it.
+    console.error('[lead-outreach-dispatch] qualification turn failed, handing off:', err)
+    await db.from('lead_outreach_state').update({ stage: 'handed_off' }).eq('id', state.id)
+    return
+  }
+
   await logAiUsage(db, {
     accountId,
     conversationId,
