@@ -165,6 +165,18 @@ export function WhatsAppUnofficialConfig() {
     return () => window.removeEventListener('focus', onFocus);
   }, [fetchConfig]);
 
+  // Every mutating action in the child panels (connect/disconnect/save
+  // secret) must refresh BOTH the local `config` state (this panel's
+  // own detail view) AND the shared `/api/whatsapp/connection` summary
+  // — the latter drives `showPrimarySwitch` below and the inbox
+  // banner/settings-overview tiles elsewhere. Passing only `fetchConfig`
+  // left the primary-channel switch (and any other consumer of the
+  // shared hook) stale until a full page reload.
+  const refreshAll = useCallback(async () => {
+    await fetchConfig();
+    connection.refresh();
+  }, [fetchConfig, connection.refresh]);
+
   const disabled = !canEdit;
   const showPrimarySwitch =
     !!connection.summary?.official.connected && !!connection.summary?.unofficial.connected;
@@ -270,7 +282,7 @@ export function WhatsAppUnofficialConfig() {
             config={config}
             canEdit={canEdit}
             acknowledged={acknowledged}
-            onSaved={fetchConfig}
+            onSaved={refreshAll}
           />
         ) : (
           <EvolutionPanel
@@ -278,7 +290,7 @@ export function WhatsAppUnofficialConfig() {
             config={config}
             canEdit={canEdit}
             acknowledged={acknowledged}
-            onSaved={fetchConfig}
+            onSaved={refreshAll}
           />
         )}
 
@@ -673,6 +685,13 @@ function EvolutionPanel({
   async function openReconnectModal() {
     setDisplayName(savedDisplayName);
     setConnectedPhone(null);
+    // Reset step/qrCode BEFORE opening — `step`/`qrCode` persist across
+    // modal opens (they're panel-lifetime state, not per-dialog), so
+    // without this a modal reopened after a prior successful connect
+    // would flash the old "Connected!"/Done screen (or a stale QR
+    // image) until generateQr()'s await resolves.
+    setQrCode(null);
+    setStep('scan');
     setModalOpen(true);
     await generateQr(savedDisplayName);
   }
@@ -773,7 +792,7 @@ function EvolutionPanel({
                   variant="outline"
                   size="sm"
                   onClick={openReconnectModal}
-                  disabled={!canEdit}
+                  disabled={!canEdit || generating}
                 >
                   <QrCode className="size-4" />
                   {t('evolutionReconnect')}

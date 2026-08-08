@@ -92,4 +92,16 @@ export interface InboundConnection {
   /** Sender-of-record for inserts that need a NOT NULL `user_id` FK
    *  (contacts, conversations). */
   userId: string
+  /**
+   * Whether this provider delivers real, tappable interactive
+   * buttons/lists. Omitted or `true` (Meta) means the normalizer's
+   * `interactiveReplyId` is trusted as-is. Explicit `false`
+   * (WaSenderAPI / Evolution — see `providers/interactive-fallback.ts`)
+   * makes `processInboundMessage` additionally try to map a customer's
+   * typed reply back to the option they meant, so Flows/Automations
+   * still advance identically. A capability flag, not a provider name —
+   * keeps the shared inbound core provider-agnostic per the structural
+   * guard test.
+   */
+  nativeInteractive?: boolean
 }

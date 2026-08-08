@@ -368,9 +368,15 @@ export async function sendMessageToConversation(
     workingPhone = result.workingPhone;
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : 'Unknown Meta API error';
-    console.error('[send-message] Meta send failed for all variants:', message);
-    throw new SendMessageError('meta_error', `Meta API error: ${message}`, 502);
+      err instanceof Error ? err.message : 'Unknown provider API error';
+    console.error(`[send-message] ${provider.id} send failed for all variants:`, message);
+    // Error CODE stays 'meta_error' — documented public-API contract
+    // (docs/public-api.md) that predates multi-provider support and
+    // existing integrations pattern-match on it. Only the human-facing
+    // MESSAGE is made provider-generic, so a WaSenderAPI/Evolution
+    // outage isn't misreported as "Meta API error" in logs/UI/webhook
+    // payloads while the machine-readable code stays backward compatible.
+    throw new SendMessageError('meta_error', `${provider.id} send error: ${message}`, 502);
   }
 
   if (workingPhone !== sanitizedPhone) {
@@ -407,7 +413,7 @@ export async function sendMessageToConversation(
     console.error('[send-message] error inserting sent message:', msgError);
     throw new SendMessageError(
       'db_error',
-      `Message sent to Meta but failed to save to DB: ${msgError.message}`,
+      `Message sent via ${provider.id} but failed to save to DB: ${msgError.message}`,
       500
     );
   }

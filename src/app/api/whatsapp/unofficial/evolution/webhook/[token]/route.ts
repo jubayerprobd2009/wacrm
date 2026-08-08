@@ -1,9 +1,12 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { decrypt } from '@/lib/crypto/encryption'
 import { deriveEvolutionWebhookSecret, timingSafeCompare } from '@/lib/whatsapp/providers/webhook-auth'
 import { normalizeEvolutionInboundMessage, type EvolutionWebhookBody } from '@/lib/whatsapp/providers/evolution/normalize-inbound'
+import { createEvolutionProvider } from '@/lib/whatsapp/providers/evolution/adapter'
 import { processInboundMessage } from '@/lib/whatsapp/inbound/process-inbound'
 import { handleStatusUpdate } from '@/lib/whatsapp/inbound/status-updates'
+import { ingestInboundMedia, MediaIngestError } from '@/lib/whatsapp/inbound/media-ingest'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 
 // See src/app/api/whatsapp/webhook/route.ts (Meta's equivalent) for
@@ -29,12 +32,15 @@ interface EvolutionUnofficialConfigRow {
   provider: string
   status: string
   instance_name: string | null
+  base_url: string | null
+  admin_api_key: string | null
+  instance_token: string | null
 }
 
 async function fetchConfigByToken(token: string): Promise<EvolutionUnofficialConfigRow | null> {
   const { data, error } = await supabaseAdmin()
     .from('whatsapp_unofficial_config')
-    .select('id, account_id, provider, status, instance_name')
+    .select('id, account_id, provider, status, instance_name, base_url, admin_api_key, instance_token')
     .eq('inbound_token', token)
     .eq('provider', 'evolution')
     .maybeSingle()
@@ -137,13 +143,15 @@ export async function POST(
 
   const config = await fetchConfigByToken(token)
   if (!config) {
-    // 404, not 401 — an unrecognized token isn't a signature failure,
-    // it's a route that doesn't correspond to any account.
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    // 401 (not 404) — same status and body as every other rejection
+    // below, so an attacker probing tokens can't distinguish "no such
+    // token" from "token exists but unverifiable" via status code or
+    // message. Mirrors the WaSenderAPI webhook route's posture.
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   if (!config.instance_name) {
     console.error('[evolution/webhook] config has no instance_name, cannot verify secret:', config.id)
-    return NextResponse.json({ error: 'Not configured' }, { status: 404 })
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const signingKey = process.env.WEBHOOK_SIGNING_KEY
@@ -153,14 +161,14 @@ export async function POST(
     // request is unverifiable, so reject all of them rather than
     // silently accepting.
     console.error('[evolution/webhook] WEBHOOK_SIGNING_KEY is not set — rejecting request')
-    return NextResponse.json({ error: 'Not configured' }, { status: 401 })
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const headerSecret = request.headers.get('x-webhook-secret')
   const expectedSecret = deriveEvolutionWebhookSecret(signingKey, config.instance_name)
   if (!headerSecret || !timingSafeCompare(headerSecret, expectedSecret)) {
     console.warn('[evolution/webhook] rejected request with invalid X-Webhook-Secret', config.id)
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const rawBody = await request.text()
@@ -190,10 +198,34 @@ export async function POST(
         const message = normalizeEvolutionInboundMessage(body, config.instance_name!)
         if (!message) return
 
+        // Resolve media bytes now, before the message row is inserted —
+        // normalize-inbound.ts always sets media.url = null (it has no
+        // provider handle to fetch with); this is the one place that
+        // does. A fetch/decrypt/upload failure degrades to url: null
+        // rather than dropping the whole inbound message.
+        if (message.media && config.admin_api_key) {
+          try {
+            const provider = createEvolutionProvider({
+              baseUrl: config.base_url,
+              adminApiKey: decrypt(config.admin_api_key),
+              instanceToken: config.instance_token ? decrypt(config.instance_token) : undefined,
+              instanceName: config.instance_name!,
+            })
+            const ingested = await ingestInboundMedia(message.providerMessageId, provider, {
+              accountId: config.account_id,
+              kind: message.media.kind,
+            })
+            message.media = { ...message.media, url: ingested.publicUrl }
+          } catch (err) {
+            const reason = err instanceof MediaIngestError ? err.message : String(err)
+            console.warn('[evolution/webhook] inbound media ingestion failed, storing url=null:', reason)
+          }
+        }
+
         const userId = await resolveAuditUserId(supabaseAdmin(), config.account_id)
 
         await processInboundMessage({
-          connection: { accountId: config.account_id, userId },
+          connection: { accountId: config.account_id, userId, nativeInteractive: false },
           message,
         })
 

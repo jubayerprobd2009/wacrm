@@ -382,15 +382,45 @@ export async function PATCH(request: Request) {
 
 /**
  * DELETE /api/whatsapp/unofficial/config  (admin+) — disconnect,
- * regardless of which provider is saved. Provider-agnostic: just
- * removes the account's row. (Evolution's own server-side instance
- * cleanup, if any, is expected to live in its dedicated
- * `.../evolution/disconnect` route per the plan — this endpoint only
- * owns the local config row.)
+ * regardless of which provider is saved.
+ *
+ * The dedicated `.../evolution/disconnect` route is what the Settings
+ * UI actually calls for Evolution, and does the same Evolution-side
+ * logout+delete this branch does. This generic endpoint still needs to
+ * do it too: it's directly reachable (API client, admin scripting, a
+ * future UI change) for an Evolution-provider account, and deleting
+ * only the DB row would leave the remote Evolution instance running
+ * and unreachable forever with no error surfaced anywhere.
  */
 export async function DELETE() {
   try {
     const { supabase, accountId } = await requireRole('admin');
+
+    const { data: existing } = await supabase
+      .from('whatsapp_unofficial_config')
+      .select('id, provider, base_url, admin_api_key, instance_name')
+      .eq('account_id', accountId)
+      .maybeSingle();
+
+    if (existing?.provider === 'evolution' && existing.instance_name && existing.admin_api_key) {
+      const { logoutInstance, deleteInstance } = await import(
+        '@/lib/whatsapp/providers/evolution/client'
+      );
+      const clientConfig = {
+        baseUrl: existing.base_url,
+        adminApiKey: decrypt(existing.admin_api_key),
+      };
+      try {
+        await logoutInstance(clientConfig, existing.instance_name);
+      } catch (err) {
+        console.warn('[whatsapp/unofficial/config DELETE] evolution logout failed (continuing):', err);
+      }
+      try {
+        await deleteInstance(clientConfig, existing.instance_name);
+      } catch (err) {
+        console.warn('[whatsapp/unofficial/config DELETE] evolution instance delete failed (continuing):', err);
+      }
+    }
 
     const { error } = await supabase
       .from('whatsapp_unofficial_config')

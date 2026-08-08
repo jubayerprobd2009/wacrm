@@ -128,15 +128,14 @@ export async function POST(request: Request) {
     const created = await createInstance(clientConfig, instanceName)
     const instanceToken = created.hash
 
-    const webhookSecret = deriveEvolutionWebhookSecret(signingKey, instanceName)
-    const webhookUrl = `${getBaseUrl(request)}/api/whatsapp/unofficial/evolution/webhook/${upserted.inbound_token}`
-
-    await setWebhook({ ...clientConfig, instanceToken }, instanceName, {
-      url: webhookUrl,
-      secret: webhookSecret,
-    })
-
-    const { error: finalizeErr } = await supabase
+    // Persist instance_name/instance_token immediately after creation
+    // succeeds — BEFORE setWebhook, which can fail (network blip, bad
+    // URL). If it's not saved yet and setWebhook throws, the next
+    // connect attempt's "cleanup of a previous instance" step (above)
+    // has no record of this instance and can never delete it — a
+    // permanent leak. Saving first means that cleanup step will find
+    // and remove it on the next attempt even if we fail below.
+    const { error: persistErr } = await supabase
       .from('whatsapp_unofficial_config')
       .update({
         instance_name: instanceName,
@@ -146,9 +145,38 @@ export async function POST(request: Request) {
       })
       .eq('id', upserted.id)
 
-    if (finalizeErr) {
-      console.error('[evolution/connect] failed to persist instance details:', finalizeErr)
+    if (persistErr) {
+      console.error('[evolution/connect] failed to persist instance details:', persistErr)
+      // Instance exists on Evolution's side but we couldn't record it —
+      // delete it now rather than leak it silently.
+      try {
+        await deleteInstance(clientConfig, instanceName)
+      } catch (cleanupErr) {
+        console.warn('[evolution/connect] cleanup after persist failure also failed:', cleanupErr)
+      }
       return NextResponse.json({ error: 'Failed to save Evolution instance' }, { status: 500 })
+    }
+
+    const webhookSecret = deriveEvolutionWebhookSecret(signingKey, instanceName)
+    const webhookUrl = `${getBaseUrl(request)}/api/whatsapp/unofficial/evolution/webhook/${upserted.inbound_token}`
+
+    try {
+      await setWebhook({ ...clientConfig, instanceToken }, instanceName, {
+        url: webhookUrl,
+        secret: webhookSecret,
+      })
+    } catch (err) {
+      console.error('[evolution/connect] setWebhook failed, rolling back instance:', err)
+      try {
+        await deleteInstance(clientConfig, instanceName)
+      } catch (cleanupErr) {
+        console.warn('[evolution/connect] rollback delete also failed (will retry on next connect):', cleanupErr)
+      }
+      await supabase
+        .from('whatsapp_unofficial_config')
+        .update({ status: 'disconnected', last_status_error: 'Failed to register webhook' })
+        .eq('id', upserted.id)
+      return NextResponse.json({ error: 'Failed to register Evolution webhook' }, { status: 502 })
     }
 
     return NextResponse.json({

@@ -25,6 +25,7 @@ import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { findOrCreateContact } from './contacts'
 import { findOrCreateConversation, flagBroadcastReplyIfAny } from './conversations'
 import { handleReaction, lookupInternalIdByMetaId } from './reactions'
+import { resolveEmulatedInteractiveReply } from '@/lib/whatsapp/providers/interactive-fallback'
 import type { InboundConnection, NormalizedInboundMessage } from './types'
 
 // The messages.content_type CHECK constraint (widened in migration 010
@@ -88,6 +89,21 @@ export async function processInboundMessage(
   const contentText = message.text
   const mediaUrl = message.media?.url ?? null
 
+  // Emulated-interactive fallback: providers without real tappable
+  // buttons/lists (nativeInteractive === false) render menus as
+  // numbered text on the way out (see providers/interactive-fallback.ts)
+  // — this maps the customer's typed reply back to the option id a
+  // native tap would have produced, so Flows/Automations still see an
+  // interactive reply. No-op (and no extra query) for Meta.
+  let interactiveReplyId = message.interactiveReplyId
+  if (!interactiveReplyId && connection.nativeInteractive === false && contentText) {
+    interactiveReplyId = await resolveEmulatedInteractiveReply(
+      supabaseAdmin(),
+      conversation.id,
+      contentText
+    )
+  }
+
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
   let replyToInternalId: string | null = null
@@ -134,7 +150,7 @@ export async function processInboundMessage(
     // Only populated for content_type='interactive'. Migration 010 added
     // the column; null for every other content_type so existing inserts
     // behave identically.
-    interactive_reply_id: message.interactiveReplyId,
+    interactive_reply_id: interactiveReplyId,
   })
 
   if (msgError) {
@@ -193,10 +209,10 @@ export async function processInboundMessage(
     contactId: contactRecord.id,
     conversationId: conversation.id,
     message:
-      message.interactiveReplyId
+      interactiveReplyId
         ? {
             kind: 'interactive_reply',
-            reply_id: message.interactiveReplyId,
+            reply_id: interactiveReplyId,
             reply_title: contentText ?? '',
             meta_message_id: message.providerMessageId,
           }
@@ -230,7 +246,7 @@ export async function processInboundMessage(
     // meaningful when a button/list reply actually arrived). Enables
     // automation-only chained menus; when a Flow owns the menu it will
     // have consumed the reply and this is skipped.
-    if (message.interactiveReplyId) {
+    if (interactiveReplyId) {
       automationTriggers.push('interactive_reply')
     }
   }
@@ -260,7 +276,7 @@ export async function processInboundMessage(
         conversation_id: conversation.id,
         // Only set on interactive taps; drives the interactive_reply
         // trigger's exact-id match.
-        interactive_reply_id: message.interactiveReplyId ?? undefined,
+        interactive_reply_id: interactiveReplyId ?? undefined,
       },
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
@@ -270,7 +286,7 @@ export async function processInboundMessage(
   // the account has enabled it. Awaited inside `after()` (same reason as
   // the webhook dispatch below); `dispatchInboundToAiReply` owns its
   // eligibility gates + try/catch and never throws.
-  if (!flowConsumed && !message.interactiveReplyId && inboundText.trim()) {
+  if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
     await dispatchInboundToAiReply({
       accountId,
       conversationId: conversation.id,

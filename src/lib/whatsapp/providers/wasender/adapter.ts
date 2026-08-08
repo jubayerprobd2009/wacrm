@@ -216,9 +216,26 @@ export function createWaSenderProvider(config: WaSenderProviderConfig): WhatsApp
       try {
         const status = await client.getStatus();
         const normalized = String(status.status ?? '').toLowerCase();
-        const connected = normalized.includes('connect') && !normalized.includes('disconnect');
+        // Order matters: WaSenderAPI's intermediate QR/passkey-linking
+        // states (e.g. "connecting", "need_scan") contain the substring
+        // "connect" too, so the pending-like check must run BEFORE the
+        // general "connect" match or a session still waiting to be
+        // scanned gets misreported as connected.
+        let resolvedStatus: 'connected' | 'disconnected' | 'pending';
+        if (
+          normalized.includes('connecting') ||
+          normalized.includes('pending') ||
+          normalized.includes('qr') ||
+          normalized.includes('scan')
+        ) {
+          resolvedStatus = 'pending';
+        } else if (normalized.includes('connect') && !normalized.includes('disconnect')) {
+          resolvedStatus = 'connected';
+        } else {
+          resolvedStatus = 'disconnected';
+        }
         return {
-          status: connected ? 'connected' : 'disconnected',
+          status: resolvedStatus,
           phoneNumber:
             typeof status.phone_number === 'string'
               ? status.phone_number

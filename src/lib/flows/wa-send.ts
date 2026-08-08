@@ -90,7 +90,7 @@ export async function engineSendText(
     aiGenerated: args.aiGenerated ?? false,
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    throw new Error(`message sent but DB insert failed: ${msgErr.message}`)
   }
 
   await updateConversationLastMessage(db, args.conversationId, args.text)
@@ -158,7 +158,7 @@ export async function engineSendMedia(
     messageId: waMessageId,
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    throw new Error(`message sent but DB insert failed: ${msgErr.message}`)
   }
 
   await updateConversationLastMessage(db, args.conversationId, preview)
@@ -295,7 +295,7 @@ async function sendInteractiveViaProvider(
     messageId: waMessageId,
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    throw new Error(`message sent but DB insert failed: ${msgErr.message}`)
   }
 
   await updateConversationLastMessage(db, input.conversationId, input.bodyText)

@@ -147,7 +147,7 @@ export function normalizeEvolutionInboundMessage(
   // Reactions short-circuit generically in the shared core — normalize
   // regardless of anything else on the payload, mirroring the Meta
   // normalizer's early handling.
-  if (message.reactionMessage) {
+  if (message.reactionMessage?.key?.id) {
     return {
       ...base,
       type: 'reaction',

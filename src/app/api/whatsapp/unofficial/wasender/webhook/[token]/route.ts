@@ -1,10 +1,11 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
 
 import { decrypt } from '@/lib/crypto/encryption';
 import { processInboundMessage } from '@/lib/whatsapp/inbound/process-inbound';
 import { handleStatusUpdate } from '@/lib/whatsapp/inbound/status-updates';
+import { timingSafeCompare } from '@/lib/whatsapp/providers/webhook-auth';
+import { resolveAuditUserId } from '@/lib/api/v1/contacts';
 import {
   normalizeWaSenderInboundMessage,
   type WaSenderWebhookPayload,
@@ -31,7 +32,6 @@ function supabaseAdmin() {
 interface WhatsAppUnofficialConfigRow {
   id: string;
   account_id: string;
-  user_id: string;
   provider: string;
   webhook_secret: string | null;
 }
@@ -42,17 +42,12 @@ interface WhatsAppUnofficialConfigRow {
  * WaSenderAPI has no webhook-registration API to negotiate a signing
  * key at request time — the client pastes back a Webhook Secret from
  * WaSenderAPI's own dashboard (Phase 5 UI), which is compared directly
- * against the header value. `timingSafeEqual` requires equal-length
- * buffers, so lengths are guarded first — a mismatched length is just
- * "not equal", not a crash.
+ * against the header value via the shared `timingSafeCompare` (also
+ * used by the Evolution webhook route).
  */
 function verifyWebhookSignature(secret: string, signatureHeader: string | null): boolean {
   if (!signatureHeader) return false;
-
-  const a = Buffer.from(signatureHeader);
-  const b = Buffer.from(secret);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  return timingSafeCompare(signatureHeader, secret);
 }
 
 /**
@@ -110,10 +105,17 @@ export async function POST(
 
   const { data: config, error: configError } = await supabaseAdmin()
     .from('whatsapp_unofficial_config')
-    .select('id, account_id, user_id, provider, webhook_secret')
+    .select('id, account_id, provider, webhook_secret')
     .eq('inbound_token', token)
     .eq('provider', 'wasender')
     .maybeSingle();
+
+  // Every rejection below returns the identical 401 + body — a bad
+  // token, a not-yet-configured secret, and a wrong signature must all
+  // look the same to an attacker probing tokens (mirrors the Evolution
+  // webhook route's posture). A lookup error is the one exception
+  // (500): it's an operator-side failure, not an auth outcome.
+  const UNAUTHORIZED = NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   if (configError) {
     console.error('[wasender/webhook] config lookup failed:', configError);
@@ -122,18 +124,15 @@ export async function POST(
 
   const configRow = config as WhatsAppUnofficialConfigRow | null;
   if (!configRow) {
-    // No account maps to this token — respond 401 same as a bad
-    // signature so an attacker probing tokens can't distinguish
-    // "wrong token" from "right token, wrong secret".
     console.warn('[wasender/webhook] no config found for inbound_token');
-    return NextResponse.json({ error: 'Not found' }, { status: 401 });
+    return UNAUTHORIZED;
   }
 
   if (!configRow.webhook_secret) {
     console.warn(
       `[wasender/webhook] account ${configRow.account_id} has no webhook_secret saved yet — rejecting`
     );
-    return NextResponse.json({ error: 'Webhook not configured' }, { status: 401 });
+    return UNAUTHORIZED;
   }
 
   let secret: string;
@@ -141,7 +140,7 @@ export async function POST(
     secret = decrypt(configRow.webhook_secret);
   } catch (err) {
     console.error('[wasender/webhook] webhook_secret decryption failed:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return UNAUTHORIZED;
   }
 
   const signature = request.headers.get('x-webhook-signature');
@@ -150,7 +149,7 @@ export async function POST(
     // swallowed — mirrors the Official webhook's signature-failure
     // handling.
     console.warn('[wasender/webhook] rejected request with invalid signature');
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+    return UNAUTHORIZED;
   }
 
   after(async () => {
@@ -226,10 +225,13 @@ async function processWebhookEvent(
           }
         });
 
+      const userId = await resolveAuditUserId(supabaseAdmin(), config.account_id);
+
       await processInboundMessage({
         connection: {
           accountId: config.account_id,
-          userId: config.user_id,
+          userId,
+          nativeInteractive: false,
         },
         message: normalized,
       });
@@ -240,10 +242,14 @@ async function processWebhookEvent(
 function mapSessionStatus(raw: unknown): 'connected' | 'disconnected' | 'pending' | null {
   if (typeof raw !== 'string') return null;
   const normalized = raw.toLowerCase();
-  if (normalized.includes('connect') && !normalized.includes('disconnect')) return 'connected';
-  if (normalized.includes('disconnect') || normalized.includes('logout')) return 'disconnected';
+  // Order matters: "connecting" contains "connect" too, so the
+  // pending-like check must be evaluated first — see the identical
+  // fix (and rationale) in providers/wasender/adapter.ts's
+  // getConnectionStatus.
   if (normalized.includes('pending') || normalized.includes('qr') || normalized.includes('connecting')) {
     return 'pending';
   }
+  if (normalized.includes('connect') && !normalized.includes('disconnect')) return 'connected';
+  if (normalized.includes('disconnect') || normalized.includes('logout')) return 'disconnected';
   return null;
 }

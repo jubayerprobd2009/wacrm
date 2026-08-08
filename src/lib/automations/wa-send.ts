@@ -167,7 +167,7 @@ async function sendViaEngine(input: SendInput): Promise<{ whatsapp_message_id: s
     // The provider already delivered the message; record the DB error
     // but don't pretend the send failed. The engine wraps this in a
     // log line.
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    throw new Error(`message sent but DB insert failed: ${msgErr.message}`)
   }
 
   const lastMessageText =
