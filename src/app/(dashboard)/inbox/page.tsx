@@ -468,6 +468,20 @@ function InboxPageInner() {
     setMessages(loaded);
   }, []);
 
+  // Contact was deleted from the sidebar (cascades its conversations —
+  // see contact-sidebar.tsx). Drop every conversation for that contact
+  // from the list and, if one of them was open, close the thread.
+  const handleContactDeleted = useCallback(
+    (contactId: string) => {
+      const hadActive = activeContact?.id === contactId;
+      setConversations((prev) => prev.filter((c) => c.contact_id !== contactId));
+      if (hadActive) {
+        handleCloseConversation();
+      }
+    },
+    [activeContact?.id, handleCloseConversation]
+  );
+
   const handleNewMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev;
@@ -594,7 +608,7 @@ function InboxPageInner() {
             toggle — which is itself desktop-only — never affects it. */}
         {contactPanelOpen && (
           <div className="hidden lg:block">
-            <ContactSidebar contact={activeContact} />
+            <ContactSidebar contact={activeContact} onDeleted={handleContactDeleted} />
           </div>
         )}
       </div>

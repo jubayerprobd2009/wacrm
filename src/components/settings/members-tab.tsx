@@ -72,6 +72,7 @@ import {
   PRESENCE_DOT_CLASS,
   PresenceDot,
 } from '@/components/presence/presence-dot';
+import { Input } from '@/components/ui/input';
 import { InviteMemberDialog } from './invite-member-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
@@ -130,7 +131,7 @@ function fmtExpiresIn(iso: string, t: (key: string, values?: Record<string, stri
 export function MembersTab() {
   const t = useTranslations('Settings.members');
   const tRoles = useTranslations('Settings.roles');
-  const { user, canManageMembers } = useAuth();
+  const { user, canManageMembers, account, refreshProfile } = useAuth();
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -142,6 +143,17 @@ export function MembersTab() {
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
+
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [savingWorkspaceName, setSavingWorkspaceName] = useState(false);
+
+  // Seed the editable field from the loaded account — a solo user's
+  // account is named after them at signup (017's trigger), which is
+  // why the sidebar footer shows a stray old name after someone
+  // renames themselves elsewhere; this is the one place to fix that.
+  useEffect(() => {
+    setWorkspaceName(account?.name ?? '');
+  }, [account?.name]);
 
   const loadEverything = useCallback(async () => {
     try {
@@ -275,6 +287,31 @@ export function MembersTab() {
     }
   }
 
+  async function handleRenameWorkspace() {
+    const name = workspaceName.trim();
+    if (!name || name === account?.name) return;
+    setSavingWorkspaceName(true);
+    try {
+      const res = await fetch('/api/account', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        toast.error(payload.error || 'Failed to rename workspace');
+        return;
+      }
+      await refreshProfile();
+      toast.success(t('workspaceNameSaved'));
+    } catch (err) {
+      console.error('[MembersTab] rename workspace error:', err);
+      toast.error('Could not reach the server');
+    } finally {
+      setSavingWorkspaceName(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -297,6 +334,44 @@ export function MembersTab() {
           </RequireRole>
         }
       />
+
+      {/* Workspace name — shown in the sidebar footer and anywhere else
+          the account is referenced. Editable by admin+; read-only
+          otherwise (the input itself is disabled for non-admins). */}
+      <Card>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <div className="min-w-0 flex-1 space-y-2">
+            <label
+              htmlFor="workspace-name"
+              className="text-sm font-medium text-foreground"
+            >
+              {t('workspaceName')}
+            </label>
+            <Input
+              id="workspace-name"
+              value={workspaceName}
+              onChange={(e) => setWorkspaceName(e.target.value)}
+              disabled={!canManageMembers || savingWorkspaceName}
+              maxLength={80}
+            />
+          </div>
+          <RequireRole min="admin">
+            <Button
+              onClick={handleRenameWorkspace}
+              disabled={
+                savingWorkspaceName ||
+                !workspaceName.trim() ||
+                workspaceName.trim() === account?.name
+              }
+            >
+              {savingWorkspaceName ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              {t('saveWorkspaceName')}
+            </Button>
+          </RequireRole>
+        </CardContent>
+      </Card>
 
       {/* Live presence summary across the roster. Updates without a
           full refresh as heartbeats and the local re-derive tick land. */}

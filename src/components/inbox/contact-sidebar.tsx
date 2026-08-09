@@ -15,17 +15,21 @@ import {
   DollarSign,
   StickyNote,
   Plus,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  onDeleted?: (contactId: string) => void;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+export function ContactSidebar({ contact, onDeleted }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
@@ -36,6 +40,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
@@ -119,6 +124,33 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     setAddingNote(false);
   }, [contact, newNote, accountId]);
 
+  // Deletes the contact along with its conversations/messages (cascade —
+  // see supabase/migrations/001_initial_schema.sql), used to clean up
+  // test or junk chats directly from the inbox.
+  const handleDelete = useCallback(async () => {
+    if (!contact) return;
+    if (
+      !window.confirm(
+        tSidebar("deleteConfirm", { name: contact.name || contact.phone }),
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("contacts")
+      .delete()
+      .eq("id", contact.id);
+    if (error) {
+      toast.error(tSidebar("deleteFailed"));
+      setDeleting(false);
+      return;
+    }
+    toast.success(tSidebar("deleted"));
+    onDeleted?.(contact.id);
+  }, [contact, onDeleted, tSidebar]);
+
   if (!contact) {
     return (
       <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
@@ -176,6 +208,24 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
+          </div>
+
+          {/* Delete */}
+          <div className="mt-3">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="w-full text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+            >
+              {deleting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              {tSidebar("deleteContact")}
+            </Button>
           </div>
 
           {/* Divider */}

@@ -75,6 +75,7 @@ export function ContactDetailView({
   const [editEmail, setEditEmail] = useState('');
   const [editCompany, setEditCompany] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
+  const [deletingContact, setDeletingContact] = useState(false);
 
   // Tags tab
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -223,6 +224,39 @@ export function ContactDetailView({
       onUpdated();
     }
     setSavingDetails(false);
+  }
+
+  // Deleting a contact cascades to its conversations, messages, deals,
+  // appointments, and lead-outreach state (all ON DELETE CASCADE — see
+  // supabase/migrations/001_initial_schema.sql, 038_appointments.sql,
+  // 041_lead_ai_state.sql); automations/notifications referencing it are
+  // set to NULL instead of blocking the delete. Used to clean up test /
+  // junk contacts and their chat history in one action.
+  async function deleteContact() {
+    if (!contact) return;
+    if (
+      !window.confirm(
+        t('deleteConfirm', { name: contact.name || contact.phone }),
+      )
+    ) {
+      return;
+    }
+
+    setDeletingContact(true);
+    const { error } = await supabase
+      .from('contacts')
+      .delete()
+      .eq('id', contact.id);
+
+    if (error) {
+      toast.error(t('toastDeleteFailed'));
+      setDeletingContact(false);
+      return;
+    }
+
+    toast.success(t('toastDeleted'));
+    onOpenChange(false);
+    onUpdated();
   }
 
   async function toggleTag(tagId: string) {
@@ -432,7 +466,7 @@ export function ContactDetailView({
                   </div>
                 </div>
               </div>
-              <div className="mt-3">
+              <div className="mt-3 flex items-center gap-2">
                 <Button
                   size="sm"
                   onClick={() => setTemplatePickerOpen(true)}
@@ -445,6 +479,20 @@ export function ContactDetailView({
                     <LayoutTemplate className="size-4" />
                   )}
                   {t('sendTemplateBtn')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={deleteContact}
+                  disabled={deletingContact}
+                  className="text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+                >
+                  {deletingContact ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-4" />
+                  )}
+                  {t('deleteContactBtn')}
                 </Button>
               </div>
             </SheetHeader>

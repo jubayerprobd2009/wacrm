@@ -283,7 +283,11 @@
       "deals": "Deals",
       "noTags": "No tags",
       "noDeals": "No deals",
-      "addNotePlaceholder": "Add a note..."
+      "addNotePlaceholder": "Add a note...",
+      "deleteContact": "Delete contact",
+      "deleteConfirm": "Delete {name} and all of their chat history, deals, and appointments? This can't be undone.",
+      "deleted": "Contact deleted",
+      "deleteFailed": "Failed to delete contact"
     },
     "aiBanner": {
       "pausedTitle": "AI assistant is paused here",
@@ -420,6 +424,10 @@
         "noTagsAvailable": "No tags available. Create tags in Settings."
       },
       "sendTemplateBtn": "Send template",
+      "deleteContactBtn": "Delete",
+      "deleteConfirm": "Delete {name} and all of their chat history, deals, and appointments? This can't be undone.",
+      "toastDeleted": "Contact deleted",
+      "toastDeleteFailed": "Failed to delete contact",
       "saveChangesBtn": "Save Changes",
       "saveCustomFieldsBtn": "Save Custom Fields",
       "toastPhoneRequired": "Phone number is required",
@@ -1246,6 +1254,9 @@
     "members": {
       "title": "Team members",
       "description": "People with access to this account. Roles control what each teammate can do.",
+      "workspaceName": "Workspace name",
+      "saveWorkspaceName": "Save",
+      "workspaceNameSaved": "Workspace name updated",
       "inviteMember": "Invite member",
       "online": "online",
       "away": "away",

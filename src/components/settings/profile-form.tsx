@@ -45,13 +45,34 @@ export function ProfileForm() {
   const [removeAvatar, setRemoveAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
   const [emailChangePending, setEmailChangePending] = useState(false);
+  const [pendingNewEmail, setPendingNewEmail] = useState('');
 
-  // Seed form state once the profile loads.
+  // Seed form state once the profile loads. Skip the email field while a
+  // change is pending confirmation — otherwise this clobbers the address
+  // the user just submitted back to the (still current) profile email,
+  // which made the "check your inbox" hint show the old address twice.
   useEffect(() => {
     if (!profile) return;
     setFullName(profile.full_name ?? '');
-    setEmail(profile.email ?? '');
-  }, [profile]);
+    if (!emailChangePending) {
+      setEmail(profile.email ?? '');
+    }
+  }, [profile, emailChangePending]);
+
+  // Once the confirmed address lands in `profiles.email` (synced from
+  // auth.users by a DB trigger after the user clicks the confirm links),
+  // clear the pending state so the form falls back to normal editing.
+  useEffect(() => {
+    if (
+      emailChangePending &&
+      profile?.email &&
+      pendingNewEmail &&
+      profile.email.toLowerCase() === pendingNewEmail.toLowerCase()
+    ) {
+      setEmailChangePending(false);
+      setPendingNewEmail('');
+    }
+  }, [profile, emailChangePending, pendingNewEmail]);
 
   // Cleanup object URLs to avoid leaks.
   useEffect(() => {
@@ -174,6 +195,7 @@ export function ProfileForm() {
       }
 
       setEmailChangePending(emailSent);
+      setPendingNewEmail(emailSent ? trimmedEmail : '');
       setPendingAvatar(null);
       setPreviewUrl(null);
       setRemoveAvatar(false);
@@ -295,9 +317,9 @@ export function ProfileForm() {
               <p className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                 <Mail className="mt-0.5 size-3.5 shrink-0" />
                 <span>
-                  {t.rich('emailChangeHint', { 
-                    oldEmail: profile?.email || '', 
-                    newEmail: email,
+                  {t.rich('emailChangeHint', {
+                    oldEmail: profile?.email || '',
+                    newEmail: pendingNewEmail,
                     bold: (chunks: React.ReactNode) => <strong>{chunks}</strong>
                   })}
                 </span>
