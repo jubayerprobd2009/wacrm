@@ -30,7 +30,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, outreach_system_prompt, qualification_system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key, ai_self_discloses, opt_out_applies_to_whatsapp',
+        'provider, model, system_prompt, outreach_system_prompt, qualification_system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key, ai_self_discloses, opt_out_applies_to_whatsapp, outreach_channel_mode, outreach_whatsapp_template_name, outreach_whatsapp_template_language',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -104,6 +104,21 @@ export async function POST(request: Request) {
     // either off.
     const aiSelfDiscloses = body.ai_self_discloses !== false
     const optOutAppliesToWhatsapp = body.opt_out_applies_to_whatsapp !== false
+
+    const VALID_CHANNEL_MODES = ['auto', 'whatsapp_only', 'sms_only'] as const
+    const outreachChannelMode = VALID_CHANNEL_MODES.includes(body.outreach_channel_mode)
+      ? (body.outreach_channel_mode as (typeof VALID_CHANNEL_MODES)[number])
+      : 'auto'
+    const outreachWhatsappTemplateName =
+      typeof body.outreach_whatsapp_template_name === 'string' &&
+      body.outreach_whatsapp_template_name.trim()
+        ? body.outreach_whatsapp_template_name.trim()
+        : null
+    const outreachWhatsappTemplateLanguage =
+      typeof body.outreach_whatsapp_template_language === 'string' &&
+      body.outreach_whatsapp_template_language.trim()
+        ? body.outreach_whatsapp_template_language.trim()
+        : 'en_US'
 
     let maxPer = Number(body.auto_reply_max_per_conversation)
     if (!Number.isFinite(maxPer)) maxPer = 3
@@ -185,6 +200,9 @@ export async function POST(request: Request) {
           embeddingsApiKey: null,
           aiSelfDiscloses,
           optOutAppliesToWhatsapp,
+          outreachChannelMode,
+          outreachWhatsappTemplateName,
+          outreachWhatsappTemplateLanguage,
         })
       } catch (err) {
         if (err instanceof AiError) {
@@ -227,6 +245,9 @@ export async function POST(request: Request) {
       auto_reply_max_per_conversation: maxPer,
       ai_self_discloses: aiSelfDiscloses,
       opt_out_applies_to_whatsapp: optOutAppliesToWhatsapp,
+      outreach_channel_mode: outreachChannelMode,
+      outreach_whatsapp_template_name: outreachWhatsappTemplateName,
+      outreach_whatsapp_template_language: outreachWhatsappTemplateLanguage,
     }
     // Only touch the handoff target when the form actually sent the field,
     // so a partial save (e.g. flipping a toggle) doesn't wipe it.

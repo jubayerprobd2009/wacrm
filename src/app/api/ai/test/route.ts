@@ -77,6 +77,9 @@ export async function POST(request: Request) {
         embeddingsApiKey: null,
         aiSelfDiscloses: true,
         optOutAppliesToWhatsapp: true,
+        outreachChannelMode: 'auto',
+        outreachWhatsappTemplateName: null,
+        outreachWhatsappTemplateLanguage: 'en_US',
       })
     } catch (err) {
       if (err instanceof AiError) {

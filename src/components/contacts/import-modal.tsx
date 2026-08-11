@@ -12,6 +12,7 @@ import {
   parseContactCsv,
   type ParsedContactRow,
 } from '@/lib/contacts/parse-contact-csv';
+import { parseContactXlsx } from '@/lib/contacts/parse-contact-xlsx';
 import {
   assignImportedContactTags,
   resolveImportTagIds,
@@ -165,15 +166,31 @@ export function ImportModal({
     const selected = e.target.files?.[0];
     if (!selected) return;
 
+    const isExcel = /\.(xlsx|xls)$/i.test(selected.name);
+    if (!isExcel && !/\.csv$/i.test(selected.name)) {
+      toast.error(t('toastUnsupportedFormat'));
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setFile(selected);
     setResult(null);
 
-    const text = await selected.text();
+    let parsed;
+    try {
+      parsed = isExcel
+        ? await parseContactXlsx(selected)
+        : parseContactCsv(await selected.text());
+    } catch {
+      toast.error(t('toastUnsupportedFormat'));
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     const {
       rows,
       hasTagsColumn: csvHasTags,
       hasCompanyColumn: csvHasCompany,
-    } = parseContactCsv(text);
+    } = parsed;
 
     if (rows.length === 0) {
       toast.error(t('toastNoValidRows'));
@@ -459,7 +476,7 @@ export function ImportModal({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
             onChange={handleFileChange}
             className="hidden"
           />

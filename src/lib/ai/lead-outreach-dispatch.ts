@@ -43,7 +43,9 @@ import { sendConfirmation, detectBookedReplyIntent, cancelAppointment } from './
 import type { TimeSlot } from '@/lib/google/calendar'
 import { logAiUsage } from './usage'
 import { sendSmsToConversation } from '@/lib/sms/send-message'
+import { sendMessageToConversation } from '@/lib/whatsapp/send-message'
 import { updateLeadStatus } from '@/lib/contacts/lead-status'
+import type { WhatsAppProviderId } from '@/types'
 
 interface LeadOutreachStateRow {
   id: string
@@ -358,12 +360,19 @@ async function runQualificationStep(
  * contacted. Called by the outreach cron for `contacts` where
  * `lead_status = 'new_lead'` and no `lead_outreach_state` row exists
  * yet (or `stage = 'not_started'`).
+ *
+ * `channel`/`activeWhatsAppProvider` come from the cron's single
+ * `decideInitialOutreachChannel` call (see `outreach-channel.ts`) — not
+ * re-derived here, to avoid a second live lookup and any race between
+ * decision and send.
  */
 export async function sendInitialOutreach(
   db: SupabaseClient,
   accountId: string,
   contactId: string,
   conversationId: string,
+  channel: 'whatsapp' | 'sms',
+  activeWhatsAppProvider: WhatsAppProviderId | null,
 ): Promise<void> {
   try {
     const { data: contact } = await db
@@ -400,24 +409,180 @@ export async function sendInitialOutreach(
     })
     if (!text) return
 
-    await sendSmsToConversation(db, accountId, { conversationId, body: text, isAutomated: true })
+    let sendResult: { messageId: string }
+    // Tracks what actually happened, which may differ from the
+    // requested `channel` if a WhatsApp attempt throws immediately
+    // (never reached the provider — fall straight to SMS rather than
+    // waiting for a delivery-status webhook that will never arrive).
+    let effectiveChannel: 'whatsapp' | 'sms' = channel
+    let firedInlineFallback = false
 
-    await db
-      .from('lead_outreach_state')
-      .upsert(
-        {
-          account_id: accountId,
-          contact_id: contactId,
-          conversation_id: conversationId,
-          stage: 'outreach_sent',
-          outreach_attempts: 1,
-          last_outreach_at: new Date().toISOString(),
-        },
-        { onConflict: 'account_id,contact_id' },
-      )
+    if (channel === 'whatsapp') {
+      try {
+        sendResult = await sendInitialWhatsAppOutreach(
+          db,
+          accountId,
+          conversationId,
+          text,
+          config,
+          activeWhatsAppProvider,
+        )
+      } catch (err) {
+        console.error(
+          '[lead-outreach-dispatch] initial WhatsApp outreach failed, falling back to SMS inline:',
+          err,
+        )
+        sendResult = await sendSmsToConversation(db, accountId, {
+          conversationId,
+          body: text,
+          isAutomated: true,
+        })
+        await db.from('conversations').update({ channel: 'sms' }).eq('id', conversationId)
+        effectiveChannel = 'sms'
+        firedInlineFallback = true
+      }
+    } else {
+      sendResult = await sendSmsToConversation(db, accountId, {
+        conversationId,
+        body: text,
+        isAutomated: true,
+      })
+    }
+
+    const now = new Date().toISOString()
+    await db.from('lead_outreach_state').upsert(
+      {
+        account_id: accountId,
+        contact_id: contactId,
+        conversation_id: conversationId,
+        stage: 'outreach_sent',
+        outreach_attempts: 1,
+        last_outreach_at: now,
+        outreach_channel_attempted: effectiveChannel,
+        outreach_message_id: sendResult.messageId,
+        // Already fell back inline above — mark it done so the webhook
+        // reaction / cron sweep don't try to fall back a second time.
+        whatsapp_failed_at: firedInlineFallback ? now : null,
+        sms_fallback_sent_at: firedInlineFallback ? now : null,
+      },
+      { onConflict: 'account_id,contact_id' },
+    )
 
     await updateLeadStatus(db, accountId, contactId, 'message_sent')
   } catch (err) {
     console.error('[lead-outreach-dispatch] initial outreach failed:', err)
   }
+}
+
+/**
+ * Send the initial WhatsApp touch. Meta's Cloud API requires an
+ * APPROVED template (not free text) for a business-initiated message
+ * to a contact who has never messaged in — see migration 051 and the
+ * `outreach_whatsapp_template_name` setting. Unofficial providers
+ * (Evolution/WaSender, Baileys-backed) have no such restriction and
+ * send free text like any other message.
+ */
+async function sendInitialWhatsAppOutreach(
+  db: SupabaseClient,
+  accountId: string,
+  conversationId: string,
+  text: string,
+  config: AiConfig,
+  provider: WhatsAppProviderId | null,
+): Promise<{ messageId: string }> {
+  if (provider === 'meta') {
+    if (!config.outreachWhatsappTemplateName) {
+      throw new Error(
+        'outreach_whatsapp_template_name not configured — required for Meta cold outreach',
+      )
+    }
+    return sendMessageToConversation(db, accountId, {
+      conversationId,
+      messageType: 'template',
+      templateName: config.outreachWhatsappTemplateName,
+      templateLanguage: config.outreachWhatsappTemplateLanguage,
+      templateMessageParams: { body: [text] },
+    })
+  }
+
+  // Unofficial (wasender/evolution): free text is fine.
+  return sendMessageToConversation(db, accountId, {
+    conversationId,
+    messageType: 'text',
+    contentText: text,
+  })
+}
+
+/**
+ * Fall back a lead's first-touch WhatsApp attempt to SMS. Shared by
+ * two trigger paths — the delivery-status webhook (on an explicit
+ * `'failed'` status) and the outreach cron's timeout sweep (when
+ * WhatsApp neither confirms nor explicitly fails within the stall
+ * window) — so it must be safe to call from both without ever double-
+ * sending.
+ *
+ * The conditional `UPDATE ... WHERE sms_fallback_sent_at IS NULL` is
+ * an atomic claim: Postgres serializes per-row updates, so whichever
+ * caller's UPDATE commits first gets a non-null `.select()` back and
+ * proceeds; the loser sees `sms_fallback_sent_at` already set, gets
+ * null back, and returns false without sending anything.
+ *
+ * Reuses the same AI-drafted text already sent to WhatsApp (stored on
+ * `conversations.last_message_text` by the WhatsApp send) — no second
+ * LLM call for the fallback.
+ */
+export async function fallbackToSmsIfNeeded(
+  db: SupabaseClient,
+  state: {
+    id: string
+    account_id: string
+    contact_id: string
+    conversation_id: string | null
+    outreach_message_id: string | null
+  },
+): Promise<boolean> {
+  if (!state.conversation_id || !state.outreach_message_id) return false
+
+  const { data: claimed } = await db
+    .from('lead_outreach_state')
+    .update({ whatsapp_failed_at: new Date().toISOString() })
+    .eq('id', state.id)
+    .is('sms_fallback_sent_at', null)
+    .select('id')
+    .maybeSingle()
+  if (!claimed) return false // already handled or already fell back
+
+  const { data: msg } = await db
+    .from('messages')
+    .select('status')
+    .eq('id', state.outreach_message_id)
+    .maybeSingle()
+  if (msg?.status === 'delivered' || msg?.status === 'read') return false // WA actually got through
+
+  const { data: contact } = await db
+    .from('contacts')
+    .select('do_not_contact')
+    .eq('id', state.contact_id)
+    .maybeSingle()
+  if (contact?.do_not_contact) return false
+
+  const { data: convo } = await db
+    .from('conversations')
+    .select('last_message_text')
+    .eq('id', state.conversation_id)
+    .maybeSingle()
+  const body = convo?.last_message_text?.trim()
+  if (!body) return false
+
+  await sendSmsToConversation(db, state.account_id, {
+    conversationId: state.conversation_id,
+    body,
+    isAutomated: true,
+  })
+  await db.from('conversations').update({ channel: 'sms' }).eq('id', state.conversation_id)
+  await db
+    .from('lead_outreach_state')
+    .update({ sms_fallback_sent_at: new Date().toISOString(), outreach_channel_attempted: 'sms' })
+    .eq('id', state.id)
+  return true
 }

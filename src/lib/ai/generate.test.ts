@@ -17,6 +17,9 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     embeddingsApiKey: null,
     aiSelfDiscloses: true,
     optOutAppliesToWhatsapp: true,
+    outreachChannelMode: 'auto',
+    outreachWhatsappTemplateName: null,
+    outreachWhatsappTemplateLanguage: 'en_US',
     ...overrides,
   }
 }

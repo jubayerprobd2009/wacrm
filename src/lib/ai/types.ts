@@ -49,6 +49,17 @@ export interface AiConfig {
    *  too) — same "ship a toggle with a safe default" pattern as
    *  `aiSelfDiscloses`. */
   optOutAppliesToWhatsapp: boolean
+  /** How the automated lead-outreach cron picks a channel for a new
+   *  lead's first touch: try WhatsApp then fall back to SMS ('auto',
+   *  the default), WhatsApp with no fallback ('whatsapp_only'), or the
+   *  original SMS-only behavior ('sms_only'). */
+  outreachChannelMode: 'auto' | 'whatsapp_only' | 'sms_only'
+  /** Approved Meta template used for WhatsApp cold outreach — required
+   *  when the active WhatsApp connection is Meta (Cloud API rejects
+   *  free text as a business-initiated first message), ignored for
+   *  unofficial (Evolution/WaSender) connections. */
+  outreachWhatsappTemplateName: string | null
+  outreachWhatsappTemplateLanguage: string
 }
 
 /** A single conversation turn in the shape both providers accept. */

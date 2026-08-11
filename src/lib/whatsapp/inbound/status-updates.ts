@@ -8,6 +8,7 @@
 
 import { supabaseAdmin } from './admin-client'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { fallbackToSmsIfNeeded } from '@/lib/ai/lead-outreach-dispatch'
 
 // The happy-path status ladder — pending → sent → delivered → read →
 // replied. Webhook replays must never regress a recipient back down
@@ -116,7 +117,7 @@ export async function handleStatusUpdate(status: {
   //    the owning account for delivery.
   const { data: msgRow } = await supabaseAdmin()
     .from('messages')
-    .select('conversation_id, conversations(account_id)')
+    .select('id, conversation_id, conversations(account_id)')
     .eq('message_id', status.id)
     .limit(1)
     .maybeSingle()
@@ -135,6 +136,27 @@ export async function handleStatusUpdate(status: {
           status: status.status,
         }
       )
+    }
+
+    // 4) Lead-outreach WhatsApp→SMS fallback: a 'failed' status tied to
+    //    a lead's first-touch WhatsApp attempt (outreach_message_id)
+    //    triggers an immediate SMS fallback rather than waiting for the
+    //    cron's timeout sweep. Covers Meta, Evolution, and WaSender
+    //    alike — all three webhook routes funnel through this shared
+    //    handler.
+    if (status.status === 'failed') {
+      const { data: state } = await supabaseAdmin()
+        .from('lead_outreach_state')
+        .select('id, account_id, contact_id, conversation_id, outreach_message_id')
+        .eq('outreach_message_id', msgRow.id)
+        .eq('outreach_channel_attempted', 'whatsapp')
+        .maybeSingle()
+
+      if (state) {
+        await fallbackToSmsIfNeeded(supabaseAdmin(), state).catch((err) =>
+          console.error('[status-updates] WhatsApp→SMS outreach fallback failed:', err),
+        )
+      }
     }
   }
 }

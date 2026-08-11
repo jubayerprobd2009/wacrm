@@ -16,10 +16,13 @@ interface AiConfigRow {
   embeddings_api_key: string | null
   ai_self_discloses: boolean
   opt_out_applies_to_whatsapp: boolean
+  outreach_channel_mode: 'auto' | 'whatsapp_only' | 'sms_only'
+  outreach_whatsapp_template_name: string | null
+  outreach_whatsapp_template_language: string
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, outreach_system_prompt, qualification_system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key, ai_self_discloses, opt_out_applies_to_whatsapp'
+  'provider, model, api_key, system_prompt, outreach_system_prompt, qualification_system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key, ai_self_discloses, opt_out_applies_to_whatsapp, outreach_channel_mode, outreach_whatsapp_template_name, outreach_whatsapp_template_language'
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -87,6 +90,9 @@ export async function loadAiConfig(
     embeddingsApiKey,
     aiSelfDiscloses: row.ai_self_discloses,
     optOutAppliesToWhatsapp: row.opt_out_applies_to_whatsapp,
+    outreachChannelMode: row.outreach_channel_mode,
+    outreachWhatsappTemplateName: row.outreach_whatsapp_template_name,
+    outreachWhatsappTemplateLanguage: row.outreach_whatsapp_template_language,
   }
 }
 

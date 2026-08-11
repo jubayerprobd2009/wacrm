@@ -14,6 +14,8 @@ import {
   Pencil,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
+import { useWhatsAppConnection } from '@/hooks/use-whatsapp-connection';
+import { createClient } from '@/lib/supabase/client';
 import { canEditSettings } from '@/lib/auth/roles';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,7 +41,7 @@ import { SettingsPanelHead } from './settings-panel-head';
 import { AiKnowledgeCard } from './ai-knowledge';
 import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
 import type { AiProvider } from '@/lib/ai/types';
-import type { AccountMember } from '@/types';
+import type { AccountMember, MessageTemplate } from '@/types';
 import { fetchAccountMembers, memberLabel } from '@/lib/account/members';
 import { useTranslations } from 'next-intl';
 
@@ -290,10 +292,22 @@ export function AiConfig() {
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [aiSelfDiscloses, setAiSelfDiscloses] = useState(true);
   const [optOutAppliesToWhatsapp, setOptOutAppliesToWhatsapp] = useState(true);
+  const [outreachChannelMode, setOutreachChannelMode] = useState<
+    'auto' | 'whatsapp_only' | 'sms_only'
+  >('auto');
+  const [outreachWhatsappTemplateName, setOutreachWhatsappTemplateName] = useState('');
+  const [outreachWhatsappTemplateLanguage, setOutreachWhatsappTemplateLanguage] =
+    useState('en_US');
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [maxPerConversation, setMaxPerConversation] = useState(3);
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
   const [members, setMembers] = useState<AccountMember[]>([]);
+
+  const { summary: connectionSummary } = useWhatsAppConnection();
+  // Only Meta requires (and can even represent) an approval workflow —
+  // mirrors the same check in step1-choose-template.tsx.
+  const isMetaActive = connectionSummary?.active_provider === 'meta';
 
   // Guard keyed on the account (not a bare boolean) so an in-place
   // account switch — ownership transfer, multi-account membership —
@@ -321,6 +335,11 @@ export function AiConfig() {
         setAutoReplyEnabled(data.auto_reply_enabled);
         setAiSelfDiscloses(data.ai_self_discloses !== false);
         setOptOutAppliesToWhatsapp(data.opt_out_applies_to_whatsapp !== false);
+        setOutreachChannelMode(data.outreach_channel_mode ?? 'auto');
+        setOutreachWhatsappTemplateName(data.outreach_whatsapp_template_name ?? '');
+        setOutreachWhatsappTemplateLanguage(
+          data.outreach_whatsapp_template_language ?? 'en_US',
+        );
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
         setHasStoredKey(Boolean(data.has_key));
@@ -346,6 +365,21 @@ export function AiConfig() {
     // queue option.
     void fetchAccountMembers().then(setMembers);
   }, [accountId, fetchConfig]);
+
+  // Approved WhatsApp templates for the cold-outreach picker — same
+  // fetch pattern as step1-choose-template.tsx. Only APPROVED templates
+  // are selectable here since this is specifically for Meta's
+  // business-initiated-message requirement.
+  useEffect(() => {
+    if (!accountId) return;
+    const supabase = createClient();
+    supabase
+      .from('message_templates')
+      .select('*')
+      .eq('status', 'APPROVED')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setTemplates((data as MessageTemplate[]) ?? []));
+  }, [accountId]);
 
   // Swap the model default when the provider changes, unless the user
   // typed a custom model.
@@ -377,6 +411,9 @@ export function AiConfig() {
     auto_reply_enabled: autoReplyEnabled,
     ai_self_discloses: aiSelfDiscloses,
     opt_out_applies_to_whatsapp: optOutAppliesToWhatsapp,
+    outreach_channel_mode: outreachChannelMode,
+    outreach_whatsapp_template_name: outreachWhatsappTemplateName || null,
+    outreach_whatsapp_template_language: outreachWhatsappTemplateLanguage,
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
   });
@@ -410,6 +447,18 @@ export function AiConfig() {
     }
     if (!configured && !keyEdited) {
       toast.error(t('missingApiKey'));
+      return;
+    }
+    // Meta requires an approved template for a business-initiated first
+    // message — required only when outreach might actually go via
+    // WhatsApp AND the active connection is Meta (unofficial connections
+    // send free text, no template needed).
+    if (
+      outreachChannelMode !== 'sms_only' &&
+      isMetaActive &&
+      !outreachWhatsappTemplateName
+    ) {
+      toast.error(t('missingOutreachTemplate'));
       return;
     }
     setSaving(true);
@@ -447,6 +496,9 @@ export function AiConfig() {
         setAutoReplyEnabled(false);
         setAiSelfDiscloses(true);
         setOptOutAppliesToWhatsapp(true);
+        setOutreachChannelMode('auto');
+        setOutreachWhatsappTemplateName('');
+        setOutreachWhatsappTemplateLanguage('en_US');
         setSystemPrompt('');
         setOutreachSystemPrompt('');
         setQualificationSystemPrompt('');
@@ -732,6 +784,79 @@ export function AiConfig() {
                 onCheckedChange={setOptOutAppliesToWhatsapp}
                 disabled={disabled}
               />
+            </div>
+
+            <div className="space-y-3 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t('outreachChannel')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('outreachChannelDesc')}
+                </p>
+              </div>
+              <Select
+                value={outreachChannelMode}
+                onValueChange={(v) =>
+                  setOutreachChannelMode(v as 'auto' | 'whatsapp_only' | 'sms_only')
+                }
+                disabled={disabled}
+              >
+                <SelectTrigger id="ai-outreach-channel">
+                  <SelectValue>
+                    {outreachChannelMode === 'auto' && t('outreachChannelAuto')}
+                    {outreachChannelMode === 'whatsapp_only' &&
+                      t('outreachChannelWhatsappOnly')}
+                    {outreachChannelMode === 'sms_only' && t('outreachChannelSmsOnly')}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">{t('outreachChannelAuto')}</SelectItem>
+                  <SelectItem value="whatsapp_only">
+                    {t('outreachChannelWhatsappOnly')}
+                  </SelectItem>
+                  <SelectItem value="sms_only">{t('outreachChannelSmsOnly')}</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {outreachChannelMode !== 'sms_only' && (
+                <div className="space-y-1.5 pt-1">
+                  <Label htmlFor="ai-outreach-template">
+                    {t('outreachWhatsappTemplate')}
+                  </Label>
+                  <Select
+                    value={outreachWhatsappTemplateName || undefined}
+                    onValueChange={(v) => {
+                      if (!v) return;
+                      setOutreachWhatsappTemplateName(v);
+                      const tpl = templates.find((tt) => tt.name === v);
+                      if (tpl?.language) setOutreachWhatsappTemplateLanguage(tpl.language);
+                    }}
+                    disabled={disabled || templates.length === 0}
+                  >
+                    <SelectTrigger id="ai-outreach-template">
+                      <SelectValue>
+                        {outreachWhatsappTemplateName || t('outreachWhatsappTemplatePlaceholder')}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {templates.map((tpl) => (
+                        <SelectItem key={tpl.id} value={tpl.name}>
+                          {tpl.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {templates.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {t('outreachWhatsappTemplateNone')}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {t('outreachWhatsappTemplateDesc')}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between gap-4">
