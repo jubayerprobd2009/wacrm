@@ -70,4 +70,51 @@ describe('parseContactCsv', () => {
       ],
     });
   });
+
+  it('matches First/Last Name and a non-"phone" phone column (real lead-export header shape)', () => {
+    // Mirrors a real client lead export: separate first/last name columns,
+    // and the phone number living in "Other Phone 1" with Home/Mobile/Work
+    // present but blank.
+    const csv = `First Name,Last Name,Email,Home,Mobile,Work,Other Phone 1
+Tara,Wooding,woodingtara@yahoo.com,,,,9199046874
+Reginald,Blakeney,blakeney1914@gmail.com,,,,7577755991`;
+
+    const result = parseContactCsv(csv);
+    expect(result.rows).toEqual([
+      {
+        phone: '9199046874',
+        name: 'Tara Wooding',
+        email: 'woodingtara@yahoo.com',
+        company: undefined,
+        tagNames: [],
+      },
+      {
+        phone: '7577755991',
+        name: 'Reginald Blakeney',
+        email: 'blakeney1914@gmail.com',
+        company: undefined,
+        tagNames: [],
+      },
+    ]);
+  });
+
+  it('prefers Mobile over a blank Home when both are present', () => {
+    const csv = `Name,Home,Mobile
+Alice,,+15551234567`;
+
+    expect(parseContactCsv(csv).rows).toEqual([
+      { phone: '+15551234567', name: 'Alice', email: undefined, company: undefined, tagNames: [] },
+    ]);
+  });
+
+  it('still returns empty when no phone-like column exists at all', () => {
+    const csv = `Name,Email
+Alice,alice@example.com`;
+
+    expect(parseContactCsv(csv)).toEqual({
+      hasTagsColumn: false,
+      hasCompanyColumn: false,
+      rows: [],
+    });
+  });
 });
